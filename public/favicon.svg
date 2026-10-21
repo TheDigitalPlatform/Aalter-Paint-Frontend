@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 116 89" fill="none">
+  <!-- Left square -->
+  <rect x="2" y="2" width="54" height="54" stroke="#E20714" stroke-width="3.5" fill="none" />
+  <text x="29" y="43" font-family="'Archivo', system-ui, sans-serif" font-weight="900" font-size="41" text-anchor="middle" fill="#E20714">A</text>
+
+  <!-- Right square -->
+  <rect x="58" y="2" width="56" height="54" stroke="#E20714" stroke-width="3.5" fill="none" />
+  <line x1="58" y1="2" x2="114" y2="56" stroke="#E20714" stroke-width="3.5" stroke-linecap="square" />
+
+  <!-- Text -->
+  <text x="1" y="82" font-family="'Archivo', system-ui, sans-serif" font-weight="800" font-size="23" letter-spacing="-0.5px" fill="#E20714">Aalterpaint</text>
+</svg>
