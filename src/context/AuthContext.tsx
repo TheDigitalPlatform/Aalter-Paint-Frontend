@@ -1,16 +1,23 @@
 import { createContext, useContext, useState, useCallback, type ReactNode } from "react";
-import { getToken, getUser, setToken, logout as authLogout, loginApi, signupApi, type AuthUser, type LoginCredentials, type SignupCredentials } from "../lib/auth";
+import {
+  getToken,
+  getUser,
+  setToken,
+  logout as authLogout,
+  loginApi,
+  signupApi,
+  type AuthUser,
+  type LoginCredentials,
+  type SignupCredentials,
+} from "../lib/auth";
 
 interface AuthContextValue {
   user: AuthUser | null;
   token: string | null;
   isAuthenticated: boolean;
   loading: boolean;
-
-  login: (creds: LoginCredentials) => Promise<{success: boolean; message: string; token?: string;}>;
-
-  signup: (creds: SignupCredentials) => Promise<{success: boolean; message: string; token?: string;}>;
-
+  login: (creds: LoginCredentials) => Promise<{ success: boolean; message: string; token?: string }>;
+  signup: (creds: SignupCredentials) => Promise<{ success: boolean; message: string; token?: string }>;
   logout: () => void;
 }
 
@@ -23,14 +30,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const login = useCallback(async (creds: LoginCredentials) => {
     setLoading(true);
-
     try {
       const res = await loginApi(creds);
-
-      setToken(res.token, !!creds.rememberMe);
+      setToken(res.token);
       setTokenState(res.token);
       setUserState(getUser());
-
       return {
         success: true,
         message: res.message,
@@ -48,16 +52,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signup = useCallback(async (creds: SignupCredentials) => {
     setLoading(true);
-
     try {
       const res = await signupApi(creds);
-
       if (res.token) {
         setToken(res.token);
         setTokenState(res.token);
         setUserState(getUser());
       }
-
       return {
         success: true,
         message: res.message,
@@ -80,7 +81,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   return (
-    <AuthContext.Provider value={{ user, token, isAuthenticated: !!token, loading, login, signup, logout }}>
+    <AuthContext.Provider
+      value={{
+        user,
+        token,
+        isAuthenticated: !!token && !!user,
+        loading,
+        login,
+        signup,
+        logout,
+      }}
+    >
       {children}
     </AuthContext.Provider>
   );

@@ -4,6 +4,7 @@ import { Mail, Lock } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { Button, TextInput, Logo } from '../../components/common';
 import { emailRegex } from '../../components/validation/constant';
+import { useTranslation } from '../../context/LanguageContext';
 import { toast } from 'sonner';
 
 export const LoginPage: React.FC = () => {
@@ -23,6 +24,9 @@ export const LoginPage: React.FC = () => {
     setForm(p => ({ ...p, [k]: e.target.value }));
   };
 
+  const { language } = useTranslation();
+  const isNl = language === 'NL';
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
@@ -33,13 +37,13 @@ export const LoginPage: React.FC = () => {
       });
 
       if (res.success && res.token) {
-        toast.success(res.message || 'Login successful');
+        toast.success(res.message || (isNl ? 'Succesvol ingelogd' : 'Login successful'));
         navigate('/home');
       } else {
-        toast.error(res.message || 'Login failed');
+        toast.error(res.message || (isNl ? 'Inloggen mislukt' : 'Login failed'));
       }
     } catch (err: any) {
-      toast.error(err?.message || 'Login failed');
+      toast.error(err?.message || (isNl ? 'Inloggen mislukt' : 'Login failed'));
     }
   };
 

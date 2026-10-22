@@ -4,6 +4,7 @@ import { Mail, Lock, User, CheckCircle2 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { Button, TextInput, Logo } from '../../components/common';
 import { emailRegex } from '../../components/validation/constant';
+import { useTranslation } from '../../context/LanguageContext';
 import { toast } from 'sonner';
 
 const rules = [
@@ -13,6 +14,8 @@ const rules = [
 ];
 
 export const SignupPage: React.FC = () => {
+  const { language } = useTranslation();
+  const isNl = language === 'NL';
   const { signup, loading, token } = useAuth();
   const navigate = useNavigate();
 
@@ -65,13 +68,13 @@ export const SignupPage: React.FC = () => {
       });
 
       if (res.success) {
-        toast.success(res.message || 'Account created successfully');
+        toast.success(res.message || (isNl ? 'Account succesvol aangemaakt' : 'Account created successfully'));
         navigate('/login');
       } else {
-        toast.error(res.message || 'Signup failed');
+        toast.error(res.message || (isNl ? 'Registratie mislukt' : 'Signup failed'));
       }
     } catch (err: any) {
-      toast.error(err?.message || 'Signup failed');
+      toast.error(err?.message || (isNl ? 'Registratie mislukt' : 'Signup failed'));
     }
   };
 

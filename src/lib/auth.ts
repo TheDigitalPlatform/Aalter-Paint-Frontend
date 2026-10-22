@@ -1,13 +1,12 @@
 import { jwtDecode } from "jwt-decode";
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL;
 
-const TOKEN_KEY = "aalterpaint_token";
+const TOKEN_KEY = "aalterpaint_session_token";
 
 export interface AuthUser {
   id: string;
   name: string;
   email: string;
-  role: "admin" | "manager" | "viewer";
+  role: "admin" | "manager" | "viewer" | "user";
   avatar?: string;
 }
 
@@ -23,52 +22,28 @@ export interface SignupCredentials {
   password: string;
 }
 
-// ── Token helpers ──────────────────────────────────────────
-export function setToken(token: string, _rememberMe = false): void {
+// ── Token helpers (Strictly using sessionStorage, no localStorage) ───
+export function setToken(token: string): void {
   sessionStorage.setItem(TOKEN_KEY, token);
 }
 
 export function getToken(): string | null {
-  return sessionStorage.getItem(TOKEN_KEY) || sessionStorage.getItem("eichair_token");
+  return sessionStorage.getItem(TOKEN_KEY);
 }
 
 export function removeToken(): void {
   sessionStorage.removeItem(TOKEN_KEY);
-  sessionStorage.removeItem("eichair_token");
 }
 
 // ── User helpers ───────────────────────────────────────────
-
-export function getUser(): AuthUser | null {
-  try {
-    const token = getToken();
-    if (!token) return null;
-    const decoded: any = jwtDecode(token);
-
-    return {
-      id: String(decoded.sub || decoded.id || ""),
-      name: decoded.name || "",
-      email: decoded.email || "",
-      role: decoded.role || mapRole(decoded.role_id),
-      avatar: decoded.avatar,
-    };
-  } catch {
-    return null;
+function mapRole(roleIdOrName: any): AuthUser["role"] {
+  if (typeof roleIdOrName === "string") {
+    const r = roleIdOrName.toLowerCase();
+    if (r === "admin" || r === "directie") return "admin";
+    if (r === "manager" || r === "beheerder" || r === "beoordelaar") return "manager";
+    return "viewer";
   }
-}
-
-// ── Session ────────────────────────────────────────────────
-export function isAuthenticated(): boolean {
-  return !!getToken();
-}
-
-export function logout(): void {
-  removeToken();
-}
-
-// Helper to map backend role_id to frontend role
-function mapRole(roleId: number): AuthUser["role"] {
-  switch (roleId) {
+  switch (Number(roleIdOrName)) {
     case 1:
       return "admin";
     case 2:
@@ -78,66 +53,151 @@ function mapRole(roleId: number): AuthUser["role"] {
   }
 }
 
-// ── Login API ──────────────────────────────────────────────
+export function getUser(): AuthUser | null {
+  try {
+    const token = getToken();
+    if (!token) return null;
+    const decoded: any = jwtDecode(token);
+
+    // If token has expiry claim and is expired, clear token and return null
+    if (decoded.exp && decoded.exp * 1000 < Date.now()) {
+      removeToken();
+      return null;
+    }
+
+    return {
+      id: String(decoded.sub || decoded.id || decoded.user_id || ""),
+      name: decoded.name || decoded.full_name || (decoded.email ? decoded.email.split("@")[0] : "User"),
+      email: decoded.email || decoded.sub || "",
+      role: mapRole(decoded.role || decoded.role_id),
+      avatar: decoded.avatar,
+    };
+  } catch {
+    return null;
+  }
+}
+
+// ── Session ────────────────────────────────────────────────
+export function isAuthenticated(): boolean {
+  const user = getUser();
+  return !!user && !!getToken();
+}
+
+export function logout(): void {
+  removeToken();
+}
+
+// ── API URL resolution ───────────────────────────────────────
+function getAuthUrl(endpoint: "login" | "register"): string {
+  const rawBase = (import.meta.env.VITE_API_BASE_URL || "/api").trim().replace(/\/+$/, "");
+  if (rawBase.endsWith("/api")) {
+    return `${rawBase}/auth/${endpoint}`;
+  }
+  return `${rawBase}/api/auth/${endpoint}`;
+}
+
+// ── Login API: POST /api/auth/login ────────────────────────
 export async function loginApi(creds: LoginCredentials): Promise<{ success: boolean; message: string; token: string }> {
-  const response = await fetch(`${API_BASE_URL}auth/login`, {
+  const url = getAuthUrl("login");
+
+  const response = await fetch(url, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
+      Accept: "application/json",
     },
     body: JSON.stringify({
-      email: creds.email,
+      email: creds.email.trim(),
       password: creds.password,
     }),
   });
 
-  const result = await response.json();
+  const result = await response.json().catch(() => ({}));
 
-  if (!response.ok || !result.success) {
-    let msg = result.message || "Login failed";
-    if (result && result.detail) {
-      msg = result.detail;
+  if (!response.ok) {
+    let msg = "Login failed";
+    if (result.detail) {
+      if (typeof result.detail === "string") {
+        msg = result.detail;
+      } else if (Array.isArray(result.detail) && result.detail.length > 0) {
+        msg = result.detail.map((d: any) => d.msg || d.message || JSON.stringify(d)).join(", ");
+      }
+    } else if (result.message) {
+      msg = result.message;
+    } else if (response.status === 401) {
+      msg = "Invalid email or password";
     }
     throw new Error(msg);
   }
 
+  const token =
+    result.access_token ||
+    result.data?.access_token ||
+    result.token ||
+    result.data?.token ||
+    result.jwt;
+
+  if (!token) {
+    throw new Error(result.message || "No access token received from authentication server");
+  }
+
   return {
-    success: result.success,
-    message: result.message,
-    token: result.data.access_token
+    success: true,
+    message: result.message || "Login successful",
+    token,
   };
 }
 
-// ── Register API ───────────────────────────────────────────
-export async function signupApi(creds: SignupCredentials): Promise<{ success: boolean; message: string; user: AuthUser; token?: string }> {
-  const response = await fetch(`${API_BASE_URL}auth/register`, {
+// ── Register API: POST /api/auth/register ───────────────────
+export async function signupApi(creds: SignupCredentials): Promise<{ success: boolean; message: string; user?: AuthUser; token?: string }> {
+  const url = getAuthUrl("register");
+
+  const response = await fetch(url, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
+      Accept: "application/json",
     },
     body: JSON.stringify({
-      name: creds.name,
-      email: creds.email,
+      name: creds.name.trim(),
+      email: creds.email.trim(),
       password: creds.password,
     }),
   });
 
-  const result = await response.json();
+  const result = await response.json().catch(() => ({}));
 
-  if (!response.ok || !result.success) {
-    throw new Error(result.message || "Registration failed");
+  if (!response.ok) {
+    let msg = "Registration failed";
+    if (result.detail) {
+      if (typeof result.detail === "string") {
+        msg = result.detail;
+      } else if (Array.isArray(result.detail) && result.detail.length > 0) {
+        msg = result.detail.map((d: any) => d.msg || d.message || JSON.stringify(d)).join(", ");
+      }
+    } else if (result.message) {
+      msg = result.message;
+    }
+    throw new Error(msg);
   }
 
-  const data = result.data;
+  const token =
+    result.access_token ||
+    result.data?.access_token ||
+    result.token ||
+    result.data?.token;
 
   return {
-    success: result.success,
-    message: result.message,
-    user: {
-      id: String(data.id),
-      name: data.name,
-      email: data.email,
-      role: mapRole(data.role_id),
-    },
+    success: true,
+    message: result.message || "Account created successfully",
+    token,
+    user: result.data
+      ? {
+          id: String(result.data.id || ""),
+          name: result.data.name || creds.name,
+          email: result.data.email || creds.email,
+          role: mapRole(result.data.role || result.data.role_id),
+        }
+      : undefined,
   };
 }
