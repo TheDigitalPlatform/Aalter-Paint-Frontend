@@ -75,23 +75,15 @@ function AppRoutes() {
       {/* Protected Dashboard Routes */}
       <Route element={<ProtectedRoute />}>
         <Route path="/overview" element={<HomePage initialModule="overview" />} />
-        <Route path="/overzicht" element={<HomePage initialModule="overview" />} />
         <Route path="/insights" element={<HomePage initialModule="insights" />} />
         <Route path="/orders" element={<HomePage initialModule="orders" />} />
         <Route path="/validation" element={<HomePage initialModule="validation" />} />
-        <Route path="/validatie" element={<HomePage initialModule="validation" />} />
         <Route path="/exceptions" element={<HomePage initialModule="exceptions" />} />
-        <Route path="/uitzonderingen" element={<HomePage initialModule="exceptions" />} />
         <Route path="/institutions" element={<HomePage initialModule="institutions" />} />
-        <Route path="/instellingen" element={<HomePage initialModule="institutions" />} />
-        <Route path="/settings" element={<HomePage initialModule="institutions" />} />
         <Route path="/roles" element={<HomePage initialModule="roles" />} />
-        <Route path="/rollen" element={<HomePage initialModule="roles" />} />
         <Route path="/audit" element={<HomePage initialModule="audit" />} />
-        <Route path="/audittrail" element={<HomePage initialModule="audit" />} />
         <Route path="/learning" element={<HomePage initialModule="learning" />} />
-        <Route path="/learning-loop" element={<HomePage initialModule="learning" />} />
-        <Route path="/learningloop" element={<HomePage initialModule="learning" />} />
+        <Route path="/profile" element={<HomePage initialModule="profile" />} />
         <Route path="/home" element={<Navigate to="/overview" replace />} />
       </Route>
 

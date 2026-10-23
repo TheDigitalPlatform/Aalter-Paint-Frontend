@@ -41,7 +41,7 @@
     "notifications": "Notifications",
     "mark_all_read": "Mark all read",
     "notification_hint": "Notification channels can be configured under Institutions.",
-    "profile": "User Profile",
+    "profile": "My Profile",
     "sign_out": "Sign Out"
   },
   "overview": {
@@ -308,5 +308,31 @@
     "chart_title": "Customer learning curve",
     "chart_sub": "Share of order lines the AI knows or recognizes without doubt, by number of orders from that customer (POC baseline on 3,820 orders from 321 customers over 6 months)",
     "chart_footnote": "From 0% on the first order to 80.4% from 50 orders onward. Combined with the baseline level, the POC projects ±69% after three orders, ±82% after twenty, and ±87% for regular customers. Every confirmed link in the learning loop pushes a customer further along this curve."
+  },
+  "user_profile": {
+    "title": "My Profile",
+    "subtitle": "Configure your personal account metrics and administrative parameters.",
+    "signed_in_as": "Signed in as",
+    "edit_profile": "Edit Profile",
+    "cancel": "Cancel",
+    "save_changes": "Save Changes",
+    "saving": "Saving...",
+    "name_label": "NAME",
+    "name_placeholder": "Admin User",
+    "email_label": "ACCOUNT EMAIL",
+    "email_placeholder": "admin@example.com",
+    "system_role": "SYSTEM ROLE",
+    "account_status": "ACCOUNT STATUS",
+    "status_active": "Active",
+    "status_inactive": "Inactive",
+    "role_admin": "Admin",
+    "role_manager": "Manager",
+    "role_viewer": "Viewer",
+    "role_user": "User",
+    "update_success": "Profile updated successfully",
+    "update_error": "Failed to update profile",
+    "validation_name_required": "Full name is required",
+    "validation_email_invalid": "Please enter a valid email address",
+    "loading_profile": "Loading user profile..."
   }
 }

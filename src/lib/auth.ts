@@ -1,6 +1,7 @@
 import { jwtDecode } from "jwt-decode";
 
-const TOKEN_KEY = "aalterpaint_session_token";
+export const SESSION_TOKEN_KEY = "aalterpaint_session_token";
+const TOKEN_KEYS = [SESSION_TOKEN_KEY, "token", "access_token"];
 
 export interface AuthUser {
   id: string;
@@ -8,6 +9,7 @@ export interface AuthUser {
   email: string;
   role: "admin" | "manager" | "viewer" | "user";
   avatar?: string;
+  status?: string;
 }
 
 export interface LoginCredentials {
@@ -22,21 +24,52 @@ export interface SignupCredentials {
   password: string;
 }
 
-// ── Token helpers (Strictly using sessionStorage, no localStorage) ───
+// ── Token helpers ──────────────────────────────────────────
 export function setToken(token: string): void {
-  sessionStorage.setItem(TOKEN_KEY, token);
+  try {
+    sessionStorage.setItem(SESSION_TOKEN_KEY, token);
+    localStorage.setItem(SESSION_TOKEN_KEY, token);
+  } catch { }
 }
 
 export function getToken(): string | null {
-  return sessionStorage.getItem(TOKEN_KEY);
+  try {
+    for (const key of TOKEN_KEYS) {
+      const s = sessionStorage.getItem(key);
+      if (s) return s;
+      const l = localStorage.getItem(key);
+      if (l) return l;
+    }
+  } catch { }
+  return null;
 }
 
 export function removeToken(): void {
-  sessionStorage.removeItem(TOKEN_KEY);
+  try {
+    const keysToPurge = [...TOKEN_KEYS, "eichair_token"];
+    for (const key of keysToPurge) {
+      sessionStorage.removeItem(key);
+      localStorage.removeItem(key);
+    }
+  } catch { }
+}
+
+// ── API URL & Headers resolution ───────────────────────────
+export function getApiBaseUrl(): string {
+  const rawBase = (import.meta.env.VITE_API_BASE_URL || "/api").trim().replace(/\/+$/, "");
+  return rawBase.endsWith("/api") ? rawBase : `${rawBase}/api`;
+}
+
+export function getAuthHeaders(token?: string): Record<string, string> {
+  const t = token || getToken();
+  return {
+    ...(t ? { Authorization: `Bearer ${t}` } : {}),
+    Accept: "application/json",
+  };
 }
 
 // ── User helpers ───────────────────────────────────────────
-function mapRole(roleIdOrName: any): AuthUser["role"] {
+export function mapRole(roleIdOrName: any): AuthUser["role"] {
   if (typeof roleIdOrName === "string") {
     const r = roleIdOrName.toLowerCase();
     if (r === "admin" || r === "directie") return "admin";
@@ -67,10 +100,11 @@ export function getUser(): AuthUser | null {
 
     return {
       id: String(decoded.sub || decoded.id || decoded.user_id || ""),
-      name: decoded.name || decoded.full_name || (decoded.email ? decoded.email.split("@")[0] : "User"),
+      name: decoded.name || decoded.full_name || (decoded.email ? decoded.email.split("@")[0] : ""),
       email: decoded.email || decoded.sub || "",
       role: mapRole(decoded.role || decoded.role_id),
       avatar: decoded.avatar,
+      status: decoded.status || (decoded.is_active === false ? "Inactive" : "Active"),
     };
   } catch {
     return null;
@@ -87,18 +121,21 @@ export function logout(): void {
   removeToken();
 }
 
-// ── API URL resolution ───────────────────────────────────────
-function getAuthUrl(endpoint: "login" | "register"): string {
-  const rawBase = (import.meta.env.VITE_API_BASE_URL || "/api").trim().replace(/\/+$/, "");
-  if (rawBase.endsWith("/api")) {
-    return `${rawBase}/auth/${endpoint}`;
+function parseErrorMessage(result: any, defaultMsg: string): string {
+  if (result?.detail) {
+    if (typeof result.detail === "string") return result.detail;
+    if (Array.isArray(result.detail) && result.detail.length > 0) {
+      return result.detail.map((d: any) => d.msg || d.message || JSON.stringify(d)).join(", ");
+    }
+    return JSON.stringify(result.detail);
   }
-  return `${rawBase}/api/auth/${endpoint}`;
+  if (result?.message) return result.message;
+  return defaultMsg;
 }
 
 // ── Login API: POST /api/auth/login ────────────────────────
 export async function loginApi(creds: LoginCredentials): Promise<{ success: boolean; message: string; token: string }> {
-  const url = getAuthUrl("login");
+  const url = `${getApiBaseUrl()}/auth/login`;
 
   const response = await fetch(url, {
     method: "POST",
@@ -115,19 +152,8 @@ export async function loginApi(creds: LoginCredentials): Promise<{ success: bool
   const result = await response.json().catch(() => ({}));
 
   if (!response.ok) {
-    let msg = "Login failed";
-    if (result.detail) {
-      if (typeof result.detail === "string") {
-        msg = result.detail;
-      } else if (Array.isArray(result.detail) && result.detail.length > 0) {
-        msg = result.detail.map((d: any) => d.msg || d.message || JSON.stringify(d)).join(", ");
-      }
-    } else if (result.message) {
-      msg = result.message;
-    } else if (response.status === 401) {
-      msg = "Invalid email or password";
-    }
-    throw new Error(msg);
+    const defaultMsg = response.status === 401 ? "Invalid email or password" : "Login failed";
+    throw new Error(parseErrorMessage(result, defaultMsg));
   }
 
   const token =
@@ -150,7 +176,7 @@ export async function loginApi(creds: LoginCredentials): Promise<{ success: bool
 
 // ── Register API: POST /api/auth/register ───────────────────
 export async function signupApi(creds: SignupCredentials): Promise<{ success: boolean; message: string; user?: AuthUser; token?: string }> {
-  const url = getAuthUrl("register");
+  const url = `${getApiBaseUrl()}/auth/register`;
 
   const response = await fetch(url, {
     method: "POST",
@@ -168,17 +194,7 @@ export async function signupApi(creds: SignupCredentials): Promise<{ success: bo
   const result = await response.json().catch(() => ({}));
 
   if (!response.ok) {
-    let msg = "Registration failed";
-    if (result.detail) {
-      if (typeof result.detail === "string") {
-        msg = result.detail;
-      } else if (Array.isArray(result.detail) && result.detail.length > 0) {
-        msg = result.detail.map((d: any) => d.msg || d.message || JSON.stringify(d)).join(", ");
-      }
-    } else if (result.message) {
-      msg = result.message;
-    }
-    throw new Error(msg);
+    throw new Error(parseErrorMessage(result, "Registration failed"));
   }
 
   const token =
@@ -201,3 +217,4 @@ export async function signupApi(creds: SignupCredentials): Promise<{ success: bo
       : undefined,
   };
 }
+

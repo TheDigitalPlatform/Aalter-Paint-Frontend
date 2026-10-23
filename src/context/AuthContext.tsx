@@ -19,6 +19,7 @@ interface AuthContextValue {
   login: (creds: LoginCredentials) => Promise<{ success: boolean; message: string; token?: string }>;
   signup: (creds: SignupCredentials) => Promise<{ success: boolean; message: string; token?: string }>;
   logout: () => void;
+  updateUser: (updated: Partial<AuthUser>) => void;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -27,6 +28,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUserState] = useState<AuthUser | null>(getUser);
   const [token, setTokenState] = useState<string | null>(getToken);
   const [loading, setLoading] = useState(false);
+
+  const updateUser = useCallback((updated: Partial<AuthUser>) => {
+    setUserState(prev => {
+      if (!prev) return getUser();
+      return { ...prev, ...updated };
+    });
+  }, []);
 
   const login = useCallback(async (creds: LoginCredentials) => {
     setLoading(true);
@@ -90,6 +98,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         login,
         signup,
         logout,
+        updateUser,
       }}
     >
       {children}

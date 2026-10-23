@@ -41,7 +41,7 @@
     "notifications": "Meldingen",
     "mark_all_read": "Alles als gelezen markeren",
     "notification_hint": "Meldingskanalen kunnen worden ingesteld onder Instellingen.",
-    "profile": "Gebruikersprofiel",
+    "profile": "Mijn profiel",
     "sign_out": "Afmelden"
   },
   "overview": {
@@ -308,5 +308,31 @@
     "chart_title": "Leercurve per klant",
     "chart_sub": "Aandeel orderregels dat de AI kent of zonder twijfel herkent, naar aantal orders van die klant (POC-nulmeting op 3.820 orders van 321 klanten over 6 maanden)",
     "chart_footnote": "Van 0% bij de eerste order naar 80,4% vanaf 50 orders. Gecombineerd met het basisniveau verwacht de POC ±69% na drie orders, ±82% na twintig en ±87% bij vaste klanten. Elke bevestigde koppeling in de learning loop duwt een klant verder op deze curve."
+  },
+  "user_profile": {
+    "title": "Mijn profiel",
+    "subtitle": "Configureer uw persoonlijke accountparameters en administratieve instellingen.",
+    "signed_in_as": "Aangemeld als",
+    "edit_profile": "Profiel bewerken",
+    "cancel": "Annuleren",
+    "save_changes": "Wijzigingen opslaan",
+    "saving": "Opslaan...",
+    "name_label": "NAAM",
+    "name_placeholder": "Admin User",
+    "email_label": "ACCOUNT E-MAIL",
+    "email_placeholder": "admin@example.com",
+    "system_role": "SYSTEEMROL",
+    "account_status": "ACCOUNTSTATUS",
+    "status_active": "Actief",
+    "status_inactive": "Inactief",
+    "role_admin": "Beheerder",
+    "role_manager": "Manager",
+    "role_viewer": "Kijker",
+    "role_user": "Gebruiker",
+    "update_success": "Profiel succesvol bijgewerkt",
+    "update_error": "Bijwerken van profiel mislukt",
+    "validation_name_required": "Volledige naam is verplicht",
+    "validation_email_invalid": "Voer een geldig e-mailadres in",
+    "loading_profile": "Gebruikersprofiel laden..."
   }
 }

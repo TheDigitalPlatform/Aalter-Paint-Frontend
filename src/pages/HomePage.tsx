@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useLanguage } from '../context/LanguageContext';
@@ -12,6 +12,9 @@ import { SettingsView } from '../components/dashboard/SettingsView';
 import { RolesView } from '../components/dashboard/RolesView';
 import { AuditView } from '../components/dashboard/AuditView';
 import { LearningView } from '../components/dashboard/LearningView';
+import { ProfileView } from '../components/dashboard/ProfileView';
+import { getInitials } from '../lib/profileApi';
+import { User, LogOut, ChevronDown, ChevronUp, Shield } from 'lucide-react';
 import { FLOW_TILES, WAITING_ORDERS_DATA, NOTIFICATIONS_DATA } from '../data/mockData';
 
 export type ActiveModule =
@@ -23,7 +26,8 @@ export type ActiveModule =
   | 'institutions'
   | 'roles'
   | 'audit'
-  | 'learning';
+  | 'learning'
+  | 'profile';
 
 const FLOW_STEP_LABELS: Record<string, { nl: string; en: string }> = {
   'Received': { nl: 'Ontvangen', en: 'Received' },
@@ -46,14 +50,15 @@ export const HomePage: React.FC<HomePageProps> = ({ initialModule = 'overview' }
 
   const getModuleFromPath = (path: string): ActiveModule => {
     const p = path.toLowerCase();
+    if (p.includes('/profile')) return 'profile';
     if (p.includes('/audit')) return 'audit';
     if (p.includes('/learning')) return 'learning';
     if (p.includes('/insights')) return 'insights';
     if (p.includes('/orders')) return 'orders';
-    if (p.includes('/validation') || p.includes('/validatie')) return 'validation';
-    if (p.includes('/exceptions') || p.includes('/uitzonderingen')) return 'exceptions';
-    if (p.includes('/institutions') || p.includes('/settings') || p.includes('/instellingen')) return 'institutions';
-    if (p.includes('/roles') || p.includes('/rollen')) return 'roles';
+    if (p.includes('/validation')) return 'validation';
+    if (p.includes('/exceptions')) return 'exceptions';
+    if (p.includes('/institutions')) return 'institutions';
+    if (p.includes('/roles')) return 'roles';
     return initialModule || 'overview';
   };
 
@@ -67,6 +72,7 @@ export const HomePage: React.FC<HomePageProps> = ({ initialModule = 'overview' }
   });
   const [notifOpen, setNotifOpen] = useState(false);
   const [userDropdownOpen, setUserDropdownOpen] = useState(false);
+  const userDropdownRef = useRef<HTMLDivElement>(null);
   const [notifications] = useState(NOTIFICATIONS_DATA);
   const [notifRead, setNotifRead] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(() => {
@@ -370,15 +376,27 @@ export const HomePage: React.FC<HomePageProps> = ({ initialModule = 'overview' }
 
   const unreadCount = notifRead ? 0 : notifications.length;
 
-  const getInitials = (name?: string) => {
-    if (!name) return 'BV';
-    const parts = name.trim().split(/\s+/);
-    if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
-    return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
-  };
+  // Close profile dropdown on click outside
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (userDropdownRef.current && !userDropdownRef.current.contains(e.target as Node)) {
+        setUserDropdownOpen(false);
+      }
+    };
+    if (userDropdownOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [userDropdownOpen]);
 
-  const userName = user?.name || 'Bart Van Damme';
-  const userInitials = getInitials(userName);
+  const userName = user?.name || user?.email?.split('@')[0] || '';
+  const userEmail = user?.email || '';
+  const userInitials = getInitials(userName || userEmail);
+  const userRole = user?.role
+    ? user.role.charAt(0).toUpperCase() + user.role.slice(1)
+    : (language === 'NL' ? 'Gebruiker' : 'User');
 
   return (
     <div
@@ -644,7 +662,9 @@ export const HomePage: React.FC<HomePageProps> = ({ initialModule = 'overview' }
             </button>
             <span aria-hidden="true" style={{ color: '#9A9A9A' }}>/</span>
             <span style={{ color: '#1A1A1A', fontWeight: 600 }}>
-              {activeModule === 'insights'
+              {activeModule === 'profile'
+                ? (language === 'NL' ? 'Mijn profiel' : 'My Profile')
+                : activeModule === 'insights'
                 ? 'Insights'
                 : activeModule === 'orders'
                   ? 'Orders'
@@ -718,29 +738,71 @@ export const HomePage: React.FC<HomePageProps> = ({ initialModule = 'overview' }
               )}
             </button>
 
-            {/* User Avatar with Profile Dropdown */}
-            <div style={{ position: 'relative' }}>
+            {/* User Profile Button & Dropdown matching Reference Image 1 */}
+            <div ref={userDropdownRef} style={{ position: 'relative' }}>
               <button
                 onClick={() => setUserDropdownOpen(!userDropdownOpen)}
                 aria-label="User Profile"
                 style={{
-                  width: '36px',
-                  height: '36px',
-                  borderRadius: '50%',
-                  background: '#242424',
-                  color: '#FFFFFF',
                   display: 'flex',
                   alignItems: 'center',
-                  justifyContent: 'center',
-                  fontSize: '13.5px',
-                  fontWeight: 700,
-                  border: 0,
+                  gap: '8px',
+                  padding: '3px 8px 3px 3px',
+                  borderRadius: '10px',
+                  border: '1px solid transparent',
+                  background: userDropdownOpen ? '#F3F4F6' : 'transparent',
                   cursor: 'pointer',
+                  transition: 'all 0.15s ease',
+                }}
+                onMouseEnter={(e) => {
+                  if (!userDropdownOpen) e.currentTarget.style.background = '#F5F5F5';
+                }}
+                onMouseLeave={(e) => {
+                  if (!userDropdownOpen) e.currentTarget.style.background = 'transparent';
                 }}
               >
-                {userInitials}
+                {/* Squircle Initials Avatar */}
+                <div
+                  style={{
+                    width: '32px',
+                    height: '32px',
+                    borderRadius: '8px',
+                    background: '#1A1A1A',
+                    color: '#FFFFFF',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontSize: '12.5px',
+                    fontWeight: 700,
+                    fontFamily: "'Archivo', system-ui, sans-serif",
+                    letterSpacing: '0.02em',
+                    flexShrink: 0,
+                  }}
+                >
+                  {userInitials}
+                </div>
+
+                {/* User Name */}
+                <span
+                  style={{
+                    fontSize: '13.5px',
+                    fontWeight: 600,
+                    color: '#1A1A1A',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  {userName}
+                </span>
+
+                {/* Chevron icon */}
+                {userDropdownOpen ? (
+                  <ChevronUp size={14} style={{ color: '#6B6B6B' }} />
+                ) : (
+                  <ChevronDown size={14} style={{ color: '#6B6B6B' }} />
+                )}
               </button>
 
+              {/* Reference Image 1 Profile Dropdown Card */}
               {userDropdownOpen && (
                 <div
                   className="a-drop"
@@ -748,36 +810,116 @@ export const HomePage: React.FC<HomePageProps> = ({ initialModule = 'overview' }
                     position: 'absolute',
                     top: '44px',
                     right: 0,
-                    width: '220px',
+                    width: '240px',
                     background: '#FFFFFF',
-                    border: '1px solid #DADADA',
-                    boxShadow: '0 12px 32px rgba(0,0,0,0.12)',
+                    border: '1px solid #EBEBEB',
+                    borderRadius: '18px',
+                    boxShadow: '0 12px 36px rgba(0, 0, 0, 0.09)',
                     zIndex: 1100,
+                    padding: '16px',
                     display: 'flex',
                     flexDirection: 'column',
+                    boxSizing: 'border-box',
+                    animation: 'apFade 0.15s ease',
                   }}
                 >
-                  <div style={{ padding: '12px 14px', borderBottom: '1px solid #EBEBEB' }}>
-                    <p style={{ margin: 0, fontSize: '14px', fontWeight: 700, color: '#1A1A1A' }}>{userName}</p>
-                    <p style={{ margin: '2px 0 0', fontSize: '12px', color: '#6B6B6B' }}>{user?.email || 'authenticated'}</p>
+                  {/* Signed in as section */}
+                  <div>
+                    <div style={{ fontSize: '11px', fontWeight: 500, color: '#8E8E93' }}>
+                      {language === 'NL' ? 'Aangemeld als' : 'Signed in as'}
+                    </div>
+                    <div
+                      style={{
+                        fontSize: '13.5px',
+                        fontWeight: 700,
+                        color: '#1A1A1A',
+                        marginTop: '3px',
+                        wordBreak: 'break-all',
+                      }}
+                    >
+                      {userEmail}
+                    </div>
+
+                    {/* Shield Role Pill in Aalterpaint theme (Red accent, no yellow) */}
+                    <div
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '5px',
+                        marginTop: '8px',
+                        padding: '3px 9px',
+                        background: '#FCE8E8',
+                        border: '1px solid #F5C2C2',
+                        borderRadius: '6px',
+                        color: '#E20714',
+                        fontSize: '11px',
+                        fontWeight: 700,
+                      }}
+                    >
+                      <Shield size={12} strokeWidth={2.4} style={{ color: '#E20714' }} />
+                      <span>{userRole}</span>
+                    </div>
                   </div>
+
+                  {/* Subtle Divider */}
+                  <div style={{ height: '1px', background: '#F1F5F9', margin: '14px 0 8px 0' }} />
+
+                  {/* Menu Item 1: My Profile */}
                   <button
-                    onClick={handleLogout}
-                    className="row"
+                    type="button"
+                    onClick={() => {
+                      setUserDropdownOpen(false);
+                      handleNav('profile');
+                    }}
                     style={{
-                      padding: '10px 14px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '10px',
+                      width: '100%',
+                      padding: '9px 10px',
+                      borderRadius: '8px',
                       border: 0,
                       background: 'transparent',
-                      textAlign: 'left',
-                      fontSize: '13px',
-                      fontWeight: 700,
-                      color: '#E20714',
-                      textTransform: 'uppercase',
-                      letterSpacing: '0.04em',
+                      color: '#1E293B',
+                      fontSize: '13.5px',
+                      fontWeight: 600,
                       cursor: 'pointer',
+                      textAlign: 'left',
+                      transition: 'background 0.15s ease',
                     }}
+                    onMouseEnter={(e) => (e.currentTarget.style.background = '#F8FAFC')}
+                    onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
                   >
-                    Sign out
+                    <User size={16} style={{ color: '#64748B' }} />
+                    <span>{language === 'NL' ? 'Mijn profiel' : 'My Profile'}</span>
+                  </button>
+
+                  {/* Menu Item 2: Sign Out */}
+                  <button
+                    type="button"
+                    onClick={handleLogout}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '10px',
+                      width: '100%',
+                      padding: '9px 10px',
+                      borderRadius: '8px',
+                      border: 0,
+                      background: 'transparent',
+                      color: '#E20714',
+                      fontSize: '13.5px',
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                      textAlign: 'left',
+                      marginTop: '2px',
+                      transition: 'background 0.15s ease',
+                    }}
+                    onMouseEnter={(e) => (e.currentTarget.style.background = '#FEF2F2')}
+                    onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+                  >
+                    <LogOut size={16} style={{ color: '#E20714' }} />
+                    <span>{language === 'NL' ? 'Afmelden' : 'Sign Out'}</span>
                   </button>
                 </div>
               )}
@@ -912,7 +1054,9 @@ export const HomePage: React.FC<HomePageProps> = ({ initialModule = 'overview' }
             width: '100%',
           }}
         >
-          {activeModule === 'insights' ? (
+          {activeModule === 'profile' ? (
+            <ProfileView />
+          ) : activeModule === 'insights' ? (
             <InsightsView
               language={language}
               onNavigateToOrders={() => handleNav('orders')}

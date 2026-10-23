@@ -8,9 +8,9 @@ import { useTranslation } from '../../context/LanguageContext';
 import { toast } from 'sonner';
 
 const rules = [
-  { label: 'At least 8 characters', test: (v: string) => v.length >= 8 },
-  { label: 'One uppercase letter', test: (v: string) => /[A-Z]/.test(v) },
-  { label: 'One number', test: (v: string) => /\d/.test(v) },
+  { label: 'At least 8 characters', labelNl: 'Minimaal 8 tekens', test: (v: string) => v.length >= 8 },
+  { label: 'One uppercase letter', labelNl: 'Minstens één hoofdletter', test: (v: string) => /[A-Z]/.test(v) },
+  { label: 'One number', labelNl: 'Minstens één cijfer', test: (v: string) => /\d/.test(v) },
 ];
 
 export const SignupPage: React.FC = () => {
@@ -79,8 +79,16 @@ export const SignupPage: React.FC = () => {
   };
 
   const strength = rules.filter(r => r.test(form.password)).length;
-  const strengthColors = ['var(--color-error)', 'var(--color-warning)', 'var(--color-success)'];
-  const strengthLabels = ['Weak', 'Fair', 'Strong'];
+  const strengthColor =
+    strength === 1 ? '#E20714' : strength === 2 ? '#D97706' : strength === 3 ? '#1F9D55' : 'var(--color-border)';
+  const strengthLabel =
+    strength === 1
+      ? (isNl ? 'Zwak' : 'Weak')
+      : strength === 2
+      ? (isNl ? 'Gemiddeld' : 'Fair')
+      : strength === 3
+      ? (isNl ? 'Sterk' : 'Strong')
+      : (isNl ? 'Te zwak' : 'Too weak');
 
   return (
     <div className="ea-auth-wrap">
@@ -200,27 +208,74 @@ export const SignupPage: React.FC = () => {
                   autoComplete="new-password"
                   iconLeft={<Lock size={15} />}
                 />
-                {/* Strength meter */}
+                {/* Theme-based Password Strength meter */}
                 {form.password && (
                   <div style={{ marginTop: 8 }}>
-                    <div style={{ display: 'flex', gap: 4, marginBottom: 6 }}>
+                    <div style={{ display: 'flex', gap: 6, marginBottom: 6 }}>
                       {[0, 1, 2].map(i => (
-                        <div key={i} style={{
-                          flex: 1, height: 3, borderRadius: 99,
-                          background: i < strength ? strengthColors[strength - 1] : 'var(--color-border)',
-                          transition: 'background 0.3s',
-                        }} />
+                        <div
+                          key={i}
+                          style={{
+                            flex: 1,
+                            height: 4,
+                            borderRadius: 99,
+                            background: i < strength ? strengthColor : '#E2E8F0',
+                            transition: 'all 0.25s cubic-bezier(0.4, 0, 0.2, 1)',
+                          }}
+                        />
                       ))}
                     </div>
-                    <div style={{ fontSize: 11, color: strengthColors[strength - 1] ?? 'var(--color-text-muted)' }}>
-                      {form.password ? (strengthLabels[strength - 1] ?? 'Too weak') : ''}
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <span
+                        style={{
+                          fontSize: 12,
+                          fontWeight: 700,
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: 6,
+                          color: strengthColor,
+                          fontFamily: "'Archivo', system-ui, sans-serif",
+                        }}
+                      >
+                        <span
+                          style={{
+                            width: 6,
+                            height: 6,
+                            borderRadius: '50%',
+                            background: strengthColor,
+                            flexShrink: 0,
+                          }}
+                        />
+                        {strengthLabel}
+                      </span>
                     </div>
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 16px', marginTop: 6 }}>
-                      {rules.map(r => (
-                        <span key={r.label} style={{ fontSize: 11, display: 'flex', alignItems: 'center', gap: 4, color: r.test(form.password) ? 'var(--color-success)' : 'var(--color-text-muted)' }}>
-                          <CheckCircle2 size={11} /> {r.label}
-                        </span>
-                      ))}
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px 14px', marginTop: 8 }}>
+                      {rules.map(r => {
+                        const passed = r.test(form.password);
+                        return (
+                          <span
+                            key={r.label}
+                            style={{
+                              fontSize: 11.5,
+                              fontWeight: 500,
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: 5,
+                              color: passed ? '#1F9D55' : '#64748B',
+                              transition: 'color 0.2s ease',
+                            }}
+                          >
+                            <CheckCircle2
+                              size={12}
+                              style={{
+                                color: passed ? '#1F9D55' : '#CBD5E1',
+                                transition: 'color 0.2s ease',
+                              }}
+                            />
+                            {isNl ? r.labelNl : r.label}
+                          </span>
+                        );
+                      })}
                     </div>
                   </div>
                 )}
