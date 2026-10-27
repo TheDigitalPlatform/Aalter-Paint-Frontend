@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
+import { Pencil, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useTranslation } from '../../context/LanguageContext';
 import type { Language } from '../../locales/loadLocale';
@@ -41,14 +42,13 @@ function getInitials(name: string): string {
 export const RolesView: React.FC<RolesViewProps> = ({
   language: propLang,
   currentUserId: propUserId,
-  onViewAsUser,
 }) => {
   const { language: ctxLang } = useTranslation();
   const lang = propLang || ctxLang || 'NL';
   const isNl = lang === 'NL';
 
   const [users, setUsers] = useState<UserRow[]>(INITIAL_USERS);
-  const [currentUserId, setCurrentUserId] = useState<string>(propUserId || 'u1');
+  const [currentUserId] = useState<string>(propUserId || 'u1');
 
   // Dynamic Role-Module Matrix state (strictly from backend API)
   const [matrixData, setMatrixData] = useState<RoleModuleMatrixData>({ modules: [], roles: [] });
@@ -249,7 +249,7 @@ export const RolesView: React.FC<RolesViewProps> = ({
     }
   };
 
-  const handleViewAs = (u: UserRow) => {
+  /* const handleViewAs = (u: UserRow) => {
     setCurrentUserId(u.id);
     if (onViewAsUser) onViewAsUser(u);
     toast.info(
@@ -257,7 +257,7 @@ export const RolesView: React.FC<RolesViewProps> = ({
         ? `Je bekijkt de interface nu als ${u.name} (${u.role})`
         : `You are now viewing the interface as ${u.name} (${u.role})`
     );
-  };
+  }; */
 
   // Compute live dynamic modules for dialog role preview from backend data
   const matchedDialogRole = matrixData.roles.find(
@@ -467,8 +467,8 @@ export const RolesView: React.FC<RolesViewProps> = ({
                 </span>
 
                 {/* Action Buttons */}
-                <span style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-                  <button
+                <span style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                  {/* <button
                     className="bg"
                     onClick={() => handleViewAs(u)}
                     disabled={isMe}
@@ -487,45 +487,94 @@ export const RolesView: React.FC<RolesViewProps> = ({
                     }}
                   >
                     {isNl ? 'Bekijk als' : 'View as'}
-                  </button>
+                  </button> */}
                   <button
+                    type="button"
                     className="bg"
                     onClick={() => openEdit(u)}
+                    title={isNl ? 'Gebruiker bewerken' : 'Edit user'}
                     style={{
-                      minHeight: '36px',
-                      padding: '0 10px',
-                      border: '1px solid #1A1A1A',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                      height: '34px',
+                      padding: '0 12px',
+                      border: '1px solid #D1D5DB',
                       background: '#FFFFFF',
-                      borderRadius: 0,
-                      fontSize: '13px',
-                      fontWeight: 700,
+                      borderRadius: '6px',
+                      fontSize: '12px',
+                      fontWeight: 600,
+                      color: '#1F2937',
                       textTransform: 'uppercase',
-                      letterSpacing: '0.06em',
+                      letterSpacing: '0.04em',
                       cursor: 'pointer',
+                      boxShadow: '0 1px 2px rgba(0, 0, 0, 0.04)',
+                      transition: 'all 0.15s ease',
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.borderColor = '#111827';
+                      e.currentTarget.style.background = '#F9FAFB';
+                      e.currentTarget.style.color = '#111827';
+                      e.currentTarget.style.boxShadow = '0 2px 4px rgba(0, 0, 0, 0.08)';
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.borderColor = '#D1D5DB';
+                      e.currentTarget.style.background = '#FFFFFF';
+                      e.currentTarget.style.color = '#1F2937';
+                      e.currentTarget.style.boxShadow = '0 1px 2px rgba(0, 0, 0, 0.04)';
                     }}
                   >
-                    {isNl ? 'Bewerken' : 'Edit'}
+                    <Pencil size={13} style={{ strokeWidth: 2.2, color: 'currentColor' }} />
+                    <span>{isNl ? 'Bewerken' : 'Edit'}</span>
                   </button>
                   <button
+                    type="button"
                     className="bg"
                     onClick={() => openDel(u)}
                     disabled={isMe}
+                    title={
+                      isMe
+                        ? (isNl ? 'Je kunt je eigen account niet verwijderen' : 'You cannot delete your own account')
+                        : (isNl ? 'Gebruiker verwijderen' : 'Delete user')
+                    }
                     style={{
-                      minHeight: '36px',
-                      padding: '0 10px',
-                      border: '1px solid #C9C9C9',
-                      background: '#FFFFFF',
-                      borderRadius: 0,
-                      fontSize: '13px',
-                      fontWeight: 700,
-                      color: isMe ? '#8C8C8C' : '#A61B1B',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                      height: '34px',
+                      padding: '0 12px',
+                      border: isMe ? '1px solid #E5E7EB' : '1px solid #FECACA',
+                      background: isMe ? '#F9FAFB' : '#FEF2F2',
+                      borderRadius: '6px',
+                      fontSize: '12px',
+                      fontWeight: 600,
+                      color: isMe ? '#9CA3AF' : '#DC2626',
                       textTransform: 'uppercase',
-                      letterSpacing: '0.06em',
+                      letterSpacing: '0.04em',
                       cursor: isMe ? 'not-allowed' : 'pointer',
-                      opacity: isMe ? 0.45 : 1,
+                      opacity: isMe ? 0.6 : 1,
+                      boxShadow: isMe ? 'none' : '0 1px 2px rgba(220, 38, 38, 0.05)',
+                      transition: 'all 0.15s ease',
+                    }}
+                    onMouseEnter={(e) => {
+                      if (!isMe) {
+                        e.currentTarget.style.borderColor = '#F87171';
+                        e.currentTarget.style.background = '#FEE2E2';
+                        e.currentTarget.style.color = '#B91C1C';
+                        e.currentTarget.style.boxShadow = '0 2px 5px rgba(220, 38, 38, 0.15)';
+                      }
+                    }}
+                    onMouseLeave={(e) => {
+                      if (!isMe) {
+                        e.currentTarget.style.borderColor = '#FECACA';
+                        e.currentTarget.style.background = '#FEF2F2';
+                        e.currentTarget.style.color = '#DC2626';
+                        e.currentTarget.style.boxShadow = '0 1px 2px rgba(220, 38, 38, 0.05)';
+                      }
                     }}
                   >
-                    {isNl ? 'Verwijderen' : 'Delete'}
+                    <Trash2 size={13} style={{ strokeWidth: 2.2, color: 'currentColor' }} />
+                    <span>{isNl ? 'Verwijderen' : 'Delete'}</span>
                   </button>
                 </span>
               </div>
