@@ -218,3 +218,63 @@ export async function signupApi(creds: SignupCredentials): Promise<{ success: bo
   };
 }
 
+// ── Forgot Password API: POST /api/auth/forgot-password ──
+export async function forgotPasswordApi(
+  email: string
+): Promise<{ success: boolean; message: string }> {
+  const url = `${getApiBaseUrl()}/auth/forgot-password`;
+
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Accept: "application/json",
+    },
+    body: JSON.stringify({ email: email.trim().toLowerCase() }),
+  });
+
+  const result = await response.json().catch(() => ({}));
+
+  if (!response.ok) {
+    throw new Error(parseErrorMessage(result, "Failed to send reset link"));
+  }
+
+  return {
+    success: result.success ?? true,
+    message: result.message || "Password reset instructions sent to your email",
+  };
+}
+
+// ── Reset Password API: POST /api/auth/reset-password ────
+export async function resetPasswordApi(payload: {
+  token: string;
+  password?: string;
+  new_password?: string;
+}): Promise<{ success: boolean; message: string }> {
+  const url = `${getApiBaseUrl()}/auth/reset-password`;
+  const effectivePassword = payload.new_password || payload.password || "";
+
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Accept: "application/json",
+    },
+    body: JSON.stringify({
+      token: payload.token.trim(),
+      new_password: effectivePassword,
+      password: effectivePassword,
+    }),
+  });
+
+  const result = await response.json().catch(() => ({}));
+
+  if (!response.ok) {
+    throw new Error(parseErrorMessage(result, "Failed to reset password"));
+  }
+
+  return {
+    success: result.success ?? true,
+    message: result.message || "Password reset complete",
+  };
+}

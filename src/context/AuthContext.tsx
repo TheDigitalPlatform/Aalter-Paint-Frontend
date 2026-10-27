@@ -6,6 +6,8 @@ import {
   logout as authLogout,
   loginApi,
   signupApi,
+  forgotPasswordApi,
+  resetPasswordApi,
   type AuthUser,
   type LoginCredentials,
   type SignupCredentials,
@@ -18,6 +20,8 @@ interface AuthContextValue {
   loading: boolean;
   login: (creds: LoginCredentials) => Promise<{ success: boolean; message: string; token?: string }>;
   signup: (creds: SignupCredentials) => Promise<{ success: boolean; message: string; token?: string }>;
+  forgotPassword: (email: string) => Promise<{ success: boolean; message: string }>;
+  resetPassword: (payload: { token: string; password: string }) => Promise<{ success: boolean; message: string }>;
   logout: () => void;
   updateUser: (updated: Partial<AuthUser>) => void;
 }
@@ -82,6 +86,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  const forgotPassword = useCallback(async (email: string) => {
+    setLoading(true);
+    try {
+      const res = await forgotPasswordApi(email);
+      return res;
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  const resetPassword = useCallback(async (payload: { token: string; password: string }) => {
+    setLoading(true);
+    try {
+      const res = await resetPasswordApi(payload);
+      return res;
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
   const logout = useCallback(() => {
     authLogout();
     setTokenState(null);
@@ -97,6 +121,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         loading,
         login,
         signup,
+        forgotPassword,
+        resetPassword,
         logout,
         updateUser,
       }}

@@ -100,23 +100,6 @@ export const SignupPage: React.FC = () => {
             Slimme AI-assistent voor foutloze orderinvoer, artikelverificatie en uitzonderingsbeheer.
           </p>
 
-          <div style={{ marginTop: 40, display: 'flex', flexDirection: 'column', gap: 14, textAlign: 'left', width: '100%' }}>
-            {[
-              'Automatische orderverwerking voor industriële en bouwcoatings',
-              'AI-validatie van RAL-kleuren, glansgraden en verpakkingen',
-              'Realtime ERP-koppeling, voorraadsynchronisatie en werfleveringen',
-            ].map(f => (
-              <div key={f} style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
-                <div style={{
-                  width: 28, height: 28, borderRadius: '50%', background: 'rgba(255,255,255,0.12)',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
-                }}>
-                  <CheckCircle2 size={14} style={{ color: 'var(--color-accent-soft)' }} />
-                </div>
-                <span style={{ fontSize: 13, color: 'rgba(255,255,255,0.85)', lineHeight: 1.4 }}>{f}</span>
-              </div>
-            ))}
-          </div>
         </div>
       </div>
 

@@ -62,6 +62,12 @@ export const ProfileView: React.FC = () => {
 
   const initials = getInitials(profile?.name || user?.name || user?.email || '');
 
+  // Detect whether user has entered or changed text from original profile
+  const hasChanges = Boolean(
+    profile &&
+      (editName !== (profile.name || '') || editEmail !== (profile.email || ''))
+  );
+
   const handleStartEdit = () => {
     if (profile) {
       setEditName(profile.name || '');
@@ -109,12 +115,13 @@ export const ProfileView: React.FC = () => {
       setProfile(updated);
       setEditName(updated.name || '');
       setEditEmail(updated.email || '');
+      setErrors({});
 
       const roleStr = getRoleName(updated.role);
       updateUser({
         name: updated.name,
         email: updated.email,
-        role: (roleStr ? roleStr.toLowerCase() : user?.role) as any,
+        role: (roleStr ? roleStr.toLowerCase() : userRoleRef.current) as any,
         status: updated.status || (updated.is_active === false ? 'Inactive' : 'Active'),
       });
 
@@ -393,7 +400,7 @@ export const ProfileView: React.FC = () => {
                 </div>
               </div>
 
-              {/* Right Action Controls: Edit Profile OR Cancel / Save Changes */}
+              {/* Right Action Controls: Edit Profile button in view mode, or Cancel & conditional Save button in edit mode */}
               <div>
                 {!isEditing ? (
                   <button
@@ -451,44 +458,48 @@ export const ProfileView: React.FC = () => {
                       <span>{t('user_profile.cancel', isNl ? 'Annuleren' : 'Cancel')}</span>
                     </button>
 
-                    <button
-                      type="button"
-                      onClick={handleSave}
-                      disabled={saving}
-                      style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '8px',
-                        background: '#E20714',
-                        border: 'none',
-                        borderRadius: '8px',
-                        padding: '9px 20px',
-                        fontSize: '13px',
-                        fontWeight: 700,
-                        color: '#FFFFFF',
-                        cursor: saving ? 'not-allowed' : 'pointer',
-                        boxShadow: '0 2px 6px rgba(226, 7, 20, 0.25)',
-                        transition: 'background-color 0.15s ease',
-                      }}
-                      onMouseEnter={(e) => {
-                        if (!saving) e.currentTarget.style.background = '#B80510';
-                      }}
-                      onMouseLeave={(e) => {
-                        if (!saving) e.currentTarget.style.background = '#E20714';
-                      }}
-                    >
-                      {saving ? (
-                        <>
-                          <Loader2 size={14} className="animate-spin" style={{ color: '#FFFFFF' }} />
-                          <span>{t('user_profile.saving', isNl ? 'Opslaan...' : 'Saving...')}</span>
-                        </>
-                      ) : (
-                        <>
-                          <Save size={14} style={{ color: '#FFFFFF' }} />
-                          <span>{t('user_profile.save_changes', isNl ? 'Wijzigingen opslaan' : 'Save Changes')}</span>
-                        </>
-                      )}
-                    </button>
+                    {/* Save Changes button ONLY displays when text is entered/changed */}
+                    {(hasChanges || saving) && (
+                      <button
+                        type="button"
+                        onClick={handleSave}
+                        disabled={saving}
+                        className="a-fade"
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '8px',
+                          background: '#E20714',
+                          border: 'none',
+                          borderRadius: '8px',
+                          padding: '9px 20px',
+                          fontSize: '13px',
+                          fontWeight: 700,
+                          color: '#FFFFFF',
+                          cursor: saving ? 'not-allowed' : 'pointer',
+                          boxShadow: '0 2px 6px rgba(226, 7, 20, 0.25)',
+                          transition: 'background-color 0.15s ease, box-shadow 0.15s ease',
+                        }}
+                        onMouseEnter={(e) => {
+                          if (!saving) e.currentTarget.style.background = '#B80510';
+                        }}
+                        onMouseLeave={(e) => {
+                          if (!saving) e.currentTarget.style.background = '#E20714';
+                        }}
+                      >
+                        {saving ? (
+                          <>
+                            <Loader2 size={14} className="animate-spin" style={{ color: '#FFFFFF' }} />
+                            <span>{t('user_profile.saving', isNl ? 'Opslaan...' : 'Saving...')}</span>
+                          </>
+                        ) : (
+                          <>
+                            <Save size={14} style={{ color: '#FFFFFF' }} />
+                            <span>{t('user_profile.save_changes', isNl ? 'Wijzigingen opslaan' : 'Save Changes')}</span>
+                          </>
+                        )}
+                      </button>
+                    )}
                   </div>
                 )}
               </div>
@@ -549,6 +560,10 @@ export const ProfileView: React.FC = () => {
                       onChange={(e) => {
                         setEditName(e.target.value);
                         if (errors.name) setErrors((prev) => ({ ...prev, name: undefined }));
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && (hasChanges || saving)) handleSave();
+                        if (e.key === 'Escape') handleCancel();
                       }}
                       placeholder={isNl ? 'Voer uw volledige naam in' : 'Enter full name'}
                       style={{
@@ -623,6 +638,10 @@ export const ProfileView: React.FC = () => {
                       onChange={(e) => {
                         setEditEmail(e.target.value);
                         if (errors.email) setErrors((prev) => ({ ...prev, email: undefined }));
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && (hasChanges || saving)) handleSave();
+                        if (e.key === 'Escape') handleCancel();
                       }}
                       placeholder={isNl ? 'Voer uw e-mailadres in' : 'Enter email address'}
                       style={{

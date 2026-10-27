@@ -21,11 +21,14 @@
   --transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-*, *::before, *::after {
+*,
+*::before,
+*::after {
   box-sizing: border-box;
 }
 
-html, body {
+html,
+body {
   margin: 0;
   padding: 0;
   min-height: 100%;
@@ -116,7 +119,9 @@ button:disabled {
   opacity: .45;
 }
 
-input, select, textarea {
+input,
+select,
+textarea {
   font: inherit;
   color: #242424;
 }
@@ -175,9 +180,9 @@ svg.s {
   cursor: pointer;
   flex-shrink: 0;
   transition: transform 0.18s cubic-bezier(0.4, 0, 0.2, 1),
-              background 0.18s ease,
-              border-color 0.18s ease,
-              box-shadow 0.18s ease;
+    background 0.18s ease,
+    border-color 0.18s ease,
+    box-shadow 0.18s ease;
   outline: none;
   /* Dark button with white chevron matching reference image */
   background: #242424;
@@ -258,9 +263,11 @@ svg.s {
   :root:not([data-theme="light"]):not(.light) * {
     scrollbar-color: #E20714 #1E1E22;
   }
+
   :root:not([data-theme="light"]):not(.light) ::-webkit-scrollbar-track {
     background: #1E1E22;
   }
+
   :root:not([data-theme="light"]):not(.light) ::-webkit-scrollbar-corner {
     background: #1E1E22;
   }
@@ -304,41 +311,93 @@ svg.s {
 }
 
 @keyframes apIn {
-  from { opacity: 0; transform: translateY(10px); }
-  to { opacity: 1; transform: none; }
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+
+  to {
+    opacity: 1;
+    transform: none;
+  }
 }
 
 @keyframes apFade {
-  from { opacity: 0; }
-  to { opacity: 1; }
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
 }
 
 @keyframes apPop {
-  0% { opacity: 0; transform: scale(.6); }
-  60% { opacity: 1; transform: scale(1.12); }
-  100% { transform: scale(1); }
+  0% {
+    opacity: 0;
+    transform: scale(.6);
+  }
+
+  60% {
+    opacity: 1;
+    transform: scale(1.12);
+  }
+
+  100% {
+    transform: scale(1);
+  }
 }
 
 @keyframes apDrop {
-  from { opacity: 0; transform: translateY(-8px) scale(.98); }
-  to { opacity: 1; transform: none; }
+  from {
+    opacity: 0;
+    transform: translateY(-8px) scale(.98);
+  }
+
+  to {
+    opacity: 1;
+    transform: none;
+  }
 }
 
 @keyframes apGrowX {
-  from { transform: scaleX(0); }
-  to { transform: scaleX(1); }
+  from {
+    transform: scaleX(0);
+  }
+
+  to {
+    transform: scaleX(1);
+  }
 }
 
 @keyframes apGrowY {
-  from { transform: scaleY(0); }
-  to { transform: scaleY(1); }
+  from {
+    transform: scaleY(0);
+  }
+
+  to {
+    transform: scaleY(1);
+  }
 }
 
 @keyframes apScan {
-  0% { top: 0; opacity: 0; }
-  8% { opacity: 1; }
-  92% { opacity: 1; }
-  100% { top: 100%; opacity: 0; }
+  0% {
+    top: 0;
+    opacity: 0;
+  }
+
+  8% {
+    opacity: 1;
+  }
+
+  92% {
+    opacity: 1;
+  }
+
+  100% {
+    top: 100%;
+    opacity: 0;
+  }
 }
 
 .a-scan {
@@ -371,12 +430,15 @@ svg.s {
     transform: translateX(-100%);
     opacity: 0;
   }
+
   20% {
     opacity: 1;
   }
+
   80% {
     opacity: 1;
   }
+
   100% {
     transform: translateX(180%);
     opacity: 0;
@@ -389,14 +451,12 @@ svg.s {
   bottom: 0;
   left: 0;
   width: 70%;
-  background: linear-gradient(
-    90deg,
-    rgba(255, 255, 255, 0) 0%,
-    rgba(255, 255, 255, 0.45) 30%,
-    rgba(255, 255, 255, 0.95) 55%,
-    rgba(255, 255, 255, 0.45) 75%,
-    rgba(255, 255, 255, 0) 100%
-  );
+  background: linear-gradient(90deg,
+      rgba(255, 255, 255, 0) 0%,
+      rgba(255, 255, 255, 0.45) 30%,
+      rgba(255, 255, 255, 0.95) 55%,
+      rgba(255, 255, 255, 0.45) 75%,
+      rgba(255, 255, 255, 0) 100%);
   filter: drop-shadow(0 0 3px rgba(255, 255, 255, 0.9));
   animation: apScanShine 0.85s cubic-bezier(.16, 1, .3, 1) both;
   pointer-events: none;
@@ -414,29 +474,63 @@ svg.s {
 }
 
 @keyframes apProg {
-  0% { transform: translateX(-110%); }
-  100% { transform: translateX(260%); }
+  0% {
+    transform: translateX(-110%);
+  }
+
+  100% {
+    transform: translateX(260%);
+  }
 }
 
 @keyframes apPulse {
-  0%, 100% { opacity: 1; transform: scale(1); }
-  50% { opacity: .35; transform: scale(.7); }
+
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+
+  50% {
+    opacity: .35;
+    transform: scale(.7);
+  }
 }
 
 @keyframes apSpark {
-  0% { transform: rotate(0) scale(1); }
-  50% { transform: rotate(180deg) scale(1.25); }
-  100% { transform: rotate(360deg) scale(1); }
+  0% {
+    transform: rotate(0) scale(1);
+  }
+
+  50% {
+    transform: rotate(180deg) scale(1.25);
+  }
+
+  100% {
+    transform: rotate(360deg) scale(1);
+  }
 }
 
 @keyframes apToast {
-  from { opacity: 0; transform: translate(-50%, 16px); }
-  to { opacity: 1; transform: translate(-50%, 0); }
+  from {
+    opacity: 0;
+    transform: translate(-50%, 16px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
 }
 
 @keyframes apGlow {
-  0% { box-shadow: 0 0 0 0 rgba(255, 211, 2, .7); }
-  100% { box-shadow: 0 0 0 14px rgba(255, 211, 2, 0); }
+  0% {
+    box-shadow: 0 0 0 0 rgba(255, 211, 2, .7);
+  }
+
+  100% {
+    box-shadow: 0 0 0 14px rgba(255, 211, 2, 0);
+  }
 }
 
 .a-in {
@@ -457,6 +551,252 @@ svg.s {
 
 .a-drop {
   animation: apDrop .3s cubic-bezier(.16, 1, .3, 1) both;
+}
+
+/* ========================================================
+   MODERN DIALOG / TINY COOL MODAL CARD POPUP ANIMATIONS
+   ======================================================== */
+@keyframes apModalBackdrop {
+  from {
+    opacity: 0;
+    backdrop-filter: blur(0px);
+    -webkit-backdrop-filter: blur(0px);
+  }
+
+  to {
+    opacity: 1;
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+  }
+}
+
+@keyframes apModalCardIn {
+  0% {
+    opacity: 0;
+    transform: scale(0.88) translateY(14px);
+  }
+
+  65% {
+    opacity: 1;
+    transform: scale(1.018) translateY(-2px);
+  }
+
+  100% {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+.ap-modal-backdrop {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  width: 100vw;
+  height: 100vh;
+  background: rgba(15, 23, 42, 0.48);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  box-sizing: border-box;
+  z-index: 99999;
+  animation: apModalBackdrop 0.2s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.ap-modal-card {
+  position: relative;
+  background: #FFFFFF;
+  width: 440px;
+  max-width: calc(100vw - 32px);
+  box-shadow: 0 20px 45px -10px rgba(0, 0, 0, 0.28), 0 0 0 1px rgba(0, 0, 0, 0.06);
+  display: flex;
+  flex-direction: column;
+  padding: 22px 24px;
+  box-sizing: border-box;
+  border-radius: 8px;
+  animation: apModalCardIn 0.28s cubic-bezier(0.16, 1, 0.3, 1) both;
+  margin: auto;
+  overflow: hidden !important;
+  scrollbar-width: none !important;
+  -ms-overflow-style: none !important;
+}
+
+.ap-modal-card::-webkit-scrollbar {
+  display: none !important;
+  width: 0 !important;
+  height: 0 !important;
+}
+
+.ap-modal-close-btn {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  border: none;
+  background: transparent;
+  color: #6B7280;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease, transform 0.12s ease;
+}
+
+.ap-modal-close-btn:hover {
+  background-color: #F3F4F6;
+  color: #111827;
+  transform: scale(1.05);
+}
+
+.ap-modal-close-btn:active {
+  transform: scale(0.95);
+}
+
+.ap-modal-input {
+  width: 100%;
+  height: 38px;
+  padding: 0 12px;
+  border: 1px solid #D1D5DB;
+  border-radius: 6px;
+  font-size: 13.5px;
+  font-weight: 400;
+  background: #FFFFFF;
+  color: #111827;
+  box-sizing: border-box;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.ap-modal-input:focus {
+  outline: none;
+  border-color: #E20714;
+  box-shadow: 0 0 0 3px rgba(226, 7, 20, 0.12);
+}
+
+.ap-modal-input::placeholder {
+  color: #9CA3AF;
+  font-size: 13px;
+}
+
+.ap-modal-select {
+  width: 100%;
+  height: 38px;
+  padding: 0 12px;
+  border: 1px solid #D1D5DB;
+  border-radius: 6px;
+  font-size: 13.5px;
+  font-weight: 400;
+  background: #FFFFFF;
+  color: #111827;
+  box-sizing: border-box;
+  cursor: pointer;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.ap-modal-select:focus {
+  outline: none;
+  border-color: #E20714;
+  box-shadow: 0 0 0 3px rgba(226, 7, 20, 0.12);
+}
+
+.ap-modal-badge {
+  font-size: 11.5px;
+  padding: 3px 8px;
+  border: 1px solid #E5E7EB;
+  background: #FFFFFF;
+  border-radius: 4px;
+  color: #374151;
+  font-weight: 500;
+  line-height: 1.4;
+  transition: border-color 0.15s ease, background-color 0.15s ease, transform 0.12s ease;
+}
+
+.ap-modal-badge:hover {
+  border-color: #D1D5DB;
+  background-color: #F3F4F6;
+  transform: translateY(-1px);
+}
+
+.ap-btn-cancel {
+  height: 36px;
+  min-height: 36px;
+  padding: 0 18px;
+  border: 1px solid #D1D5DB;
+  background: #FFFFFF;
+  color: #374151;
+  border-radius: 6px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, transform 0.12s ease;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.ap-btn-cancel:hover {
+  background-color: #F9FAFB;
+  border-color: #9CA3AF;
+  color: #111827;
+}
+
+.ap-btn-cancel:active {
+  transform: scale(0.97);
+}
+
+.ap-btn-save {
+  height: 36px;
+  min-height: 36px;
+  padding: 0 22px;
+  border: 0;
+  background: #E20714;
+  color: #FFFFFF;
+  border-radius: 6px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 12px;
+  cursor: pointer;
+  box-shadow: 0 2px 6px rgba(226, 7, 20, 0.22);
+  transition: background-color 0.15s ease, box-shadow 0.15s ease, transform 0.12s ease;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.ap-btn-save:hover {
+  background-color: #C80511;
+  box-shadow: 0 4px 12px rgba(226, 7, 20, 0.35);
+  transform: translateY(-1px);
+}
+
+.ap-btn-save:active {
+  transform: scale(0.97);
+}
+
+/* ============================================================
+   ROLE-MODULE ACCESS MATRIX (STATIC DISPLAY)
+   ============================================================ */
+
+@keyframes apMatrixSpin {
+  from {
+    transform: rotate(0deg);
+  }
+
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.ap-matrix-spinner {
+  animation: apMatrixSpin 0.8s linear infinite;
 }
 
 .a-barx {
@@ -489,11 +829,15 @@ svg.s {
   transform: translateX(5px);
 }
 
-.bp, .bd, .bg {
+.bp,
+.bd,
+.bg {
   transition: background-color .15s ease, color .15s ease, transform .1s ease;
 }
 
-.bp:active:not(:disabled), .bd:active:not(:disabled), .bg:active:not(:disabled) {
+.bp:active:not(:disabled),
+.bd:active:not(:disabled),
+.bg:active:not(:disabled) {
   transform: scale(.98);
 }
 
@@ -703,12 +1047,12 @@ a:hover {
 }
 
 @media (max-width: 640px) {
-  .ea-auth-card > div:first-child {
+  .ea-auth-card>div:first-child {
     flex-direction: column;
     align-items: flex-start !important;
   }
 
-  #signup-form > div[style*="grid-template-columns"] {
+  #signup-form>div[style*="grid-template-columns"] {
     grid-template-columns: 1fr !important;
   }
 }
@@ -803,6 +1147,7 @@ a:hover {
     border-color: #2E2E32 !important;
     box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45) !important;
   }
+
   :root:not([data-theme="light"]):not(.light) [data-sonner-toaster] [data-sonner-toast] [data-title],
   :root:not([data-theme="light"]):not(.light) [data-sonner-toaster] [data-sonner-toast] [data-description] {
     color: #FFFFFF !important;
@@ -837,3 +1182,63 @@ a:hover {
   }
 }
 
+/* Edit Permissions Button: Solid black by default, turns vibrant Aalter red on hover */
+.ap-edit-permissions-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 38px;
+  padding: 0 16px;
+  background-color: #1A1A1A;
+  color: #FFFFFF;
+  border: none;
+  border-radius: 5px;
+  font-family: 'Archivo', system-ui, sans-serif;
+  font-weight: 700;
+  font-size: 13px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: background-color 0.18s ease, box-shadow 0.18s ease, transform 0.1s ease;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+}
+
+.ap-edit-permissions-btn:hover {
+  background-color: #E20714 !important;
+  box-shadow: 0 2px 8px rgba(226, 7, 20, 0.3);
+}
+
+.ap-edit-permissions-btn:active {
+  transform: scale(0.98);
+}
+
+/* Add User Button: Solid black by default, turns vibrant Aalter red on hover */
+.ap-add-user-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 42px;
+  padding: 0 24px;
+  background-color: #1A1A1A;
+  color: #FFFFFF;
+  border: none;
+  border-radius: 0;
+  font-family: 'Archivo', system-ui, sans-serif;
+  font-weight: 700;
+  font-size: 13.5px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: background-color 0.18s ease, box-shadow 0.18s ease, transform 0.1s ease;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+}
+
+.ap-add-user-btn:hover {
+  background-color: #E20714 !important;
+  box-shadow: 0 2px 10px rgba(226, 7, 20, 0.35);
+}
+
+.ap-add-user-btn:active {
+  transform: scale(0.98);
+}
