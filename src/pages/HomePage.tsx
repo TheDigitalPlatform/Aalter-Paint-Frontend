@@ -13,21 +13,14 @@ import { RolesView } from '../components/dashboard/RolesView';
 import { AuditView } from '../components/dashboard/AuditView';
 import { LearningView } from '../components/dashboard/LearningView';
 import { ProfileView } from '../components/dashboard/ProfileView';
-import { getInitials } from '../lib/profileApi';
+import { getInitials, fetchMyProfile, getRoleName } from '../lib/profileApi';
+import { getRoleBadgeStyle } from '../lib/roleModuleApi';
+import { getModuleDisplayName, type FrontendModuleId } from '../lib/rbac';
 import { User, LogOut, ChevronDown, ChevronUp, Shield } from 'lucide-react';
+import { toast } from 'sonner';
 import { FLOW_TILES, WAITING_ORDERS_DATA, NOTIFICATIONS_DATA } from '../data/mockData';
 
-export type ActiveModule =
-  | 'overview'
-  | 'insights'
-  | 'orders'
-  | 'validation'
-  | 'exceptions'
-  | 'institutions'
-  | 'roles'
-  | 'audit'
-  | 'learning'
-  | 'profile';
+export type ActiveModule = FrontendModuleId;
 
 const FLOW_STEP_LABELS: Record<string, { nl: string; en: string }> = {
   'Received': { nl: 'Ontvangen', en: 'Received' },
@@ -43,10 +36,36 @@ interface HomePageProps {
 }
 
 export const HomePage: React.FC<HomePageProps> = ({ initialModule = 'overview' }) => {
-  const { user, logout } = useAuth();
+  const {
+    user,
+    logout,
+    updateUser,
+    hasPermission,
+    firstAllowedModule,
+  } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const { language, setLanguage } = useLanguage();
+
+  // Dynamically synchronize live profile and role on dashboard mount
+  useEffect(() => {
+    let isCancelled = false;
+    fetchMyProfile()
+      .then((data) => {
+        if (isCancelled || !data) return;
+        const roleStr = getRoleName(data.role);
+        updateUser({
+          name: data.name,
+          email: data.email,
+          role: roleStr || (typeof data.role === 'string' ? data.role : data.role?.name) || '',
+          status: data.status || (data.is_active === false ? 'Inactive' : 'Active'),
+        });
+      })
+      .catch(() => {});
+    return () => {
+      isCancelled = true;
+    };
+  }, [updateUser]);
 
   const getModuleFromPath = (path: string): ActiveModule => {
     const p = path.toLowerCase();
@@ -133,8 +152,9 @@ export const HomePage: React.FC<HomePageProps> = ({ initialModule = 'overview' }
       labelNl: 'Orders',
       labelEn: 'Orders',
       badge: 13,
-      badgeBg: '#EBEBEB',
-      badgeColor: '#242424',
+      badgeBg: '#F1F5F9',
+      badgeColor: '#334155',
+      badgeBorder: '1px solid #E2E8F0',
       icon: (active) => (
         <svg className="i" viewBox="0 0 24 24" style={{ color: active ? '#E20714' : 'currentColor' }}>
           <path d="M4 6h16M4 12h16M4 18h10" />
@@ -160,9 +180,9 @@ export const HomePage: React.FC<HomePageProps> = ({ initialModule = 'overview' }
       labelNl: 'Uitzonderingen en BC-sync',
       labelEn: 'Exceptions and BC-sync',
       badge: 2,
-      badgeBg: '#FCE8E8',
-      badgeColor: '#A61B1B',
-      badgeBorder: '1px solid #F5C2C2',
+      badgeBg: '#FEF2F2',
+      badgeColor: '#B91C1C',
+      badgeBorder: '1px solid #FECACA',
       icon: (active) => (
         <svg className="i" viewBox="0 0 24 24" style={{ color: active ? '#E20714' : 'currentColor' }}>
           <path d="M21 12a9 9 0 1 1-2.64-6.36" />
@@ -219,6 +239,10 @@ export const HomePage: React.FC<HomePageProps> = ({ initialModule = 'overview' }
       ),
     },
   ];
+
+  // Dynamically filter navigation menus strictly based on backend permissions
+  const visibleFlowNavItems = flowNavItems.filter((item) => hasPermission(item.id));
+  const visibleManageNavItems = manageNavItems.filter((item) => hasPermission(item.id));
 
   const renderNavButton = (item: NavItem) => {
     const isActive = activeModule === item.id;
@@ -354,6 +378,14 @@ export const HomePage: React.FC<HomePageProps> = ({ initialModule = 'overview' }
   }, [location.pathname, initialModule]);
 
   const handleNav = (mod: ActiveModule, orderNr?: string) => {
+    if (mod !== 'profile' && !hasPermission(mod)) {
+      toast.error(
+        language === 'NL'
+          ? `U heeft geen toegang tot de module ${getModuleDisplayName(mod, 'NL')}`
+          : `You do not have permission to access the ${getModuleDisplayName(mod, 'EN')} module`
+      );
+      return;
+    }
     if (orderNr) {
       setSelectedOrderNr(orderNr);
       try {
@@ -394,9 +426,14 @@ export const HomePage: React.FC<HomePageProps> = ({ initialModule = 'overview' }
   const userName = user?.name || user?.email?.split('@')[0] || '';
   const userEmail = user?.email || '';
   const userInitials = getInitials(userName || userEmail);
-  const userRole = user?.role
-    ? user.role.charAt(0).toUpperCase() + user.role.slice(1)
-    : (language === 'NL' ? 'Gebruiker' : 'User');
+
+  const rawRole =
+    typeof user?.role === 'object' && user?.role !== null && 'name' in (user.role as any)
+      ? (user.role as any).name
+      : user?.role;
+  const userRole = rawRole
+    ? (String(rawRole).charAt(0).toUpperCase() + String(rawRole).slice(1))
+    : '';
 
   return (
     <div
@@ -420,7 +457,7 @@ export const HomePage: React.FC<HomePageProps> = ({ initialModule = 'overview' }
             width: sidebarCollapsed ? '68px' : '236px',
             background: '#FFFFFF',
             color: '#242424',
-            borderRight: '1px solid #EBEBEB',
+            borderRight: '1px solid #E2E8F0',
             display: 'flex',
             flexDirection: 'column',
             justifyContent: 'space-between',
@@ -446,7 +483,7 @@ export const HomePage: React.FC<HomePageProps> = ({ initialModule = 'overview' }
                 alignItems: 'center',
                 textAlign: 'center',
                 gap: sidebarCollapsed ? '0px' : '4px',
-                borderBottom: '1px solid #EBEBEB',
+                borderBottom: '1px solid #E2E8F0',
                 transition: 'all 0.22s ease',
                 width: '100%',
                 boxSizing: 'border-box',
@@ -454,7 +491,7 @@ export const HomePage: React.FC<HomePageProps> = ({ initialModule = 'overview' }
             >
               <button
                 type="button"
-                onClick={() => handleNav('overview')}
+                onClick={() => handleNav(hasPermission('overview') ? 'overview' : firstAllowedModule)}
                 title="Aalterpaint"
                 style={{
                   border: 'none',
@@ -522,14 +559,14 @@ export const HomePage: React.FC<HomePageProps> = ({ initialModule = 'overview' }
             {/* Navigation Sections */}
             <nav aria-label="Modules" style={{ display: 'flex', flexDirection: 'column', gap: '2px', width: '100%' }}>
               {/* Section: Orderstroom */}
-              {!sidebarCollapsed && (
+              {!sidebarCollapsed && visibleFlowNavItems.length > 0 && (
                 <span
                   style={{
                     fontSize: '10.5px',
                     fontWeight: 700,
                     textTransform: 'uppercase',
                     letterSpacing: '0.05em',
-                    color: '#8A8A8A',
+                    color: '#64748B',
                     padding: '4px 8px 3px 8px',
                     whiteSpace: 'nowrap',
                     animation: 'apFade 0.2s ease',
@@ -539,37 +576,41 @@ export const HomePage: React.FC<HomePageProps> = ({ initialModule = 'overview' }
                 </span>
               )}
 
-              {flowNavItems.map(renderNavButton)}
+              {visibleFlowNavItems.map(renderNavButton)}
 
               {/* Section: Beheer en opvolging */}
-              {sidebarCollapsed ? (
-                <div
-                  aria-hidden="true"
-                  style={{
-                    height: '1px',
-                    background: '#EBEBEB',
-                    margin: '6px auto',
-                    width: '32px',
-                  }}
-                />
-              ) : (
-                <span
-                  style={{
-                    fontSize: '10.5px',
-                    fontWeight: 700,
-                    textTransform: 'uppercase',
-                    letterSpacing: '0.05em',
-                    color: '#8A8A8A',
-                    padding: '10px 8px 3px 8px',
-                    whiteSpace: 'nowrap',
-                    animation: 'apFade 0.2s ease',
-                  }}
-                >
-                  {language === 'NL' ? 'Beheer en opvolging' : 'Management and follow-up'}
-                </span>
-              )}
+              {visibleManageNavItems.length > 0 && (
+                <>
+                  {sidebarCollapsed ? (
+                    <div
+                      aria-hidden="true"
+                      style={{
+                        height: '1px',
+                        background: '#EBEBEB',
+                        margin: '6px auto',
+                        width: '32px',
+                      }}
+                    />
+                  ) : (
+                    <span
+                      style={{
+                        fontSize: '10.5px',
+                        fontWeight: 700,
+                        textTransform: 'uppercase',
+                        letterSpacing: '0.05em',
+                        color: '#64748B',
+                        padding: '10px 8px 3px 8px',
+                        whiteSpace: 'nowrap',
+                        animation: 'apFade 0.2s ease',
+                      }}
+                    >
+                      {language === 'NL' ? 'Beheer en opvolging' : 'Management and follow-up'}
+                    </span>
+                  )}
 
-              {manageNavItems.map(renderNavButton)}
+                  {visibleManageNavItems.map(renderNavButton)}
+                </>
+              )}
             </nav>
           </div>
 
@@ -631,7 +672,7 @@ export const HomePage: React.FC<HomePageProps> = ({ initialModule = 'overview' }
             alignItems: 'center',
             justifyContent: 'space-between',
             gap: '16px',
-            padding: '11px 32px 11px 24px',
+            padding: '12px 24px',
             background: '#FFFFFF',
             borderBottom: '1px solid #EBEBEB',
             boxShadow: '0 1px 4px rgba(0, 0, 0, 0.04)',
@@ -643,7 +684,7 @@ export const HomePage: React.FC<HomePageProps> = ({ initialModule = 'overview' }
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '15px', color: '#4D4D4D', whiteSpace: 'nowrap', minWidth: 0 }}>
             <button
               type="button"
-              onClick={() => handleNav('overview')}
+              onClick={() => handleNav(hasPermission('overview') ? 'overview' : firstAllowedModule)}
               style={{
                 border: 0,
                 background: 'transparent',
@@ -684,8 +725,8 @@ export const HomePage: React.FC<HomePageProps> = ({ initialModule = 'overview' }
             </span>
           </div>
 
-          {/* Right Header Action Controls: Language Toggle, Notifications, Profile (Shifted left comfortably away from the scrollbar) */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexShrink: 0, marginRight: '22px' }}>
+          {/* Right Header Action Controls: Language Toggle, Notifications, Profile (Flush right with accurate spacious gap) */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '18px', flexShrink: 0 }}>
             {/* Language Toggle UI (EN / NL) */}
             <LanguageToggle language={language} onChange={setLanguage} />
 
@@ -696,16 +737,17 @@ export const HomePage: React.FC<HomePageProps> = ({ initialModule = 'overview' }
               className="bg"
               style={{
                 position: 'relative',
-                width: '38px',
-                height: '38px',
+                width: '36px',
+                height: '36px',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
                 background: '#FFFFFF',
                 border: '1px solid #DADADA',
-                borderRadius: '6px',
+                borderRadius: '8px',
                 color: '#1A1A1A',
                 cursor: 'pointer',
+                transition: 'all 0.15s ease',
               }}
             >
               <svg className="i" viewBox="0 0 24 24" style={{ width: '18px', height: '18px' }}>
@@ -717,15 +759,15 @@ export const HomePage: React.FC<HomePageProps> = ({ initialModule = 'overview' }
                   className="a-pop"
                   style={{
                     position: 'absolute',
-                    top: '-5px',
-                    right: '-5px',
-                    minWidth: '18px',
-                    height: '18px',
+                    top: '-4px',
+                    right: '-4px',
+                    minWidth: '17px',
+                    height: '17px',
                     padding: '0 4px',
                     boxSizing: 'border-box',
                     background: '#E20714',
                     color: '#FFFFFF',
-                    borderRadius: '2px',
+                    borderRadius: '3px',
                     fontSize: '11px',
                     fontWeight: 700,
                     display: 'flex',
@@ -746,33 +788,35 @@ export const HomePage: React.FC<HomePageProps> = ({ initialModule = 'overview' }
                 style={{
                   display: 'flex',
                   alignItems: 'center',
-                  gap: '8px',
-                  padding: '3px 8px 3px 3px',
+                  gap: '9px',
+                  height: '36px',
+                  padding: '2px 10px 2px 3px',
                   borderRadius: '10px',
-                  border: '1px solid transparent',
-                  background: userDropdownOpen ? '#F3F4F6' : 'transparent',
+                  border: '1px solid #E5E7EB',
+                  background: userDropdownOpen ? '#F3F4F6' : '#FFFFFF',
                   cursor: 'pointer',
                   transition: 'all 0.15s ease',
+                  boxShadow: '0 1px 2px rgba(0, 0, 0, 0.04)',
                 }}
                 onMouseEnter={(e) => {
-                  if (!userDropdownOpen) e.currentTarget.style.background = '#F5F5F5';
+                  if (!userDropdownOpen) e.currentTarget.style.background = '#F9FAFB';
                 }}
                 onMouseLeave={(e) => {
-                  if (!userDropdownOpen) e.currentTarget.style.background = 'transparent';
+                  if (!userDropdownOpen) e.currentTarget.style.background = '#FFFFFF';
                 }}
               >
                 {/* Squircle Initials Avatar */}
                 <div
                   style={{
-                    width: '32px',
-                    height: '32px',
-                    borderRadius: '8px',
+                    width: '30px',
+                    height: '30px',
+                    borderRadius: '7px',
                     background: '#1A1A1A',
                     color: '#FFFFFF',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
-                    fontSize: '12.5px',
+                    fontSize: '12px',
                     fontWeight: 700,
                     fontFamily: "'Archivo', system-ui, sans-serif",
                     letterSpacing: '0.02em',
@@ -796,9 +840,9 @@ export const HomePage: React.FC<HomePageProps> = ({ initialModule = 'overview' }
 
                 {/* Chevron icon */}
                 {userDropdownOpen ? (
-                  <ChevronUp size={14} style={{ color: '#6B6B6B' }} />
+                  <ChevronUp size={14} style={{ color: '#6B6B6B', flexShrink: 0 }} />
                 ) : (
-                  <ChevronDown size={14} style={{ color: '#6B6B6B' }} />
+                  <ChevronDown size={14} style={{ color: '#6B6B6B', flexShrink: 0 }} />
                 )}
               </button>
 
@@ -840,25 +884,30 @@ export const HomePage: React.FC<HomePageProps> = ({ initialModule = 'overview' }
                       {userEmail}
                     </div>
 
-                    {/* Shield Role Pill in Aalterpaint theme (Red accent, no yellow) */}
-                    <div
-                      style={{
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: '5px',
-                        marginTop: '8px',
-                        padding: '3px 9px',
-                        background: '#FCE8E8',
-                        border: '1px solid #F5C2C2',
-                        borderRadius: '6px',
-                        color: '#E20714',
-                        fontSize: '11px',
-                        fontWeight: 700,
-                      }}
-                    >
-                      <Shield size={12} strokeWidth={2.4} style={{ color: '#E20714' }} />
-                      <span>{userRole}</span>
-                    </div>
+                    {/* Role Pill dynamically styled to match Roles UI palette */}
+                    {(() => {
+                      const [badgeBg, badgeColor, badgeBorder] = getRoleBadgeStyle(userRole);
+                      return (
+                        <div
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '5px',
+                            marginTop: '8px',
+                            padding: '3px 9px',
+                            background: badgeBg,
+                            border: `1px solid ${badgeBorder || 'transparent'}`,
+                            borderRadius: '6px',
+                            color: badgeColor,
+                            fontSize: '11px',
+                            fontWeight: 700,
+                          }}
+                        >
+                          <Shield size={12} strokeWidth={2.4} style={{ color: badgeColor }} />
+                          <span>{userRole}</span>
+                        </div>
+                      );
+                    })()}
                   </div>
 
                   {/* Subtle Divider */}
@@ -1020,23 +1069,25 @@ export const HomePage: React.FC<HomePageProps> = ({ initialModule = 'overview' }
                   </button>
                 ))}
               </div>
-              <div
-                onClick={() => {
-                  setNotifOpen(false);
-                  handleNav('institutions');
-                }}
-                style={{
-                  padding: '10px 16px',
-                  fontSize: '12px',
-                  color: '#6B6B6B',
-                  cursor: 'pointer',
-                  borderTop: '1px solid #EBEBEB',
-                }}
-              >
-                {language === 'NL'
-                  ? 'Meldingskanalen stel je in onder Instellingen.'
-                  : 'Notification channels can be configured under Settings.'}
-              </div>
+              {hasPermission('institutions') && (
+                <div
+                  onClick={() => {
+                    setNotifOpen(false);
+                    handleNav('institutions');
+                  }}
+                  style={{
+                    padding: '10px 16px',
+                    fontSize: '12px',
+                    color: '#6B6B6B',
+                    cursor: 'pointer',
+                    borderTop: '1px solid #EBEBEB',
+                  }}
+                >
+                  {language === 'NL'
+                    ? 'Meldingskanalen stel je in onder Instellingen.'
+                    : 'Notification channels can be configured under Settings.'}
+                </div>
+              )}
             </div>
           )}
         </header>
@@ -1092,7 +1143,7 @@ export const HomePage: React.FC<HomePageProps> = ({ initialModule = 'overview' }
           ) : activeModule === 'roles' ? (
             <RolesView
               language={language}
-              currentUserId="u1"
+              currentUserId={user?.id}
             />
           ) : activeModule === 'audit' ? (
             <AuditView
@@ -1136,55 +1187,59 @@ export const HomePage: React.FC<HomePageProps> = ({ initialModule = 'overview' }
 
                 {/* Action Buttons */}
                 <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
-                  <button
-                    onClick={() => handleNav('insights')}
-                    className="bg"
-                    style={{
-                      minHeight: '44px',
-                      padding: '0 16px',
-                      border: '1px solid #1A1A1A',
-                      background: '#FFFFFF',
-                      borderRadius: 0,
-                      textTransform: 'uppercase',
-                      letterSpacing: '0.06em',
-                      fontSize: '13px',
-                      fontWeight: 700,
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '8px',
-                      cursor: 'pointer',
-                    }}
-                  >
-                    {language === 'NL' ? 'ALLE INZICHTEN' : 'ALL INSIGHTS'}
-                    <svg className="s" viewBox="0 0 24 24" style={{ color: '#E20714' }}>
-                      <path d="M5 12h14M13 6l6 6-6 6" />
-                    </svg>
-                  </button>
-                  <button
-                    onClick={() => handleNav('validation', 'AP-26-04819')}
-                    className="bp"
-                    style={{
-                      minHeight: '44px',
-                      padding: '0 18px',
-                      background: '#E20714',
-                      color: '#FFFFFF',
-                      border: 0,
-                      borderRadius: 0,
-                      fontWeight: 700,
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '8px',
-                      textTransform: 'uppercase',
-                      letterSpacing: '0.06em',
-                      fontSize: '13px',
-                      cursor: 'pointer',
-                    }}
-                  >
-                    {language === 'NL' ? 'START VALIDATIE ( 6 )' : 'START VALIDATION ( 6 )'}
-                    <svg className="s" viewBox="0 0 24 24">
-                      <path d="M5 12h14M13 6l6 6-6 6" />
-                    </svg>
-                  </button>
+                  {hasPermission('insights') && (
+                    <button
+                      onClick={() => handleNav('insights')}
+                      className="bg"
+                      style={{
+                        minHeight: '44px',
+                        padding: '0 16px',
+                        border: '1px solid #1A1A1A',
+                        background: '#FFFFFF',
+                        borderRadius: 0,
+                        textTransform: 'uppercase',
+                        letterSpacing: '0.06em',
+                        fontSize: '13px',
+                        fontWeight: 700,
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '8px',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      {language === 'NL' ? 'ALLE INZICHTEN' : 'ALL INSIGHTS'}
+                      <svg className="s" viewBox="0 0 24 24" style={{ color: '#E20714' }}>
+                        <path d="M5 12h14M13 6l6 6-6 6" />
+                      </svg>
+                    </button>
+                  )}
+                  {hasPermission('validation') && (
+                    <button
+                      onClick={() => handleNav('validation', 'AP-26-04819')}
+                      className="bp"
+                      style={{
+                        minHeight: '44px',
+                        padding: '0 18px',
+                        background: '#E20714',
+                        color: '#FFFFFF',
+                        border: 0,
+                        borderRadius: 0,
+                        fontWeight: 700,
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '8px',
+                        textTransform: 'uppercase',
+                        letterSpacing: '0.06em',
+                        fontSize: '13px',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      {language === 'NL' ? 'START VALIDATIE ( 6 )' : 'START VALIDATION ( 6 )'}
+                      <svg className="s" viewBox="0 0 24 24">
+                        <path d="M5 12h14M13 6l6 6-6 6" />
+                      </svg>
+                    </button>
+                  )}
                 </div>
               </div>
 
@@ -1403,25 +1458,27 @@ export const HomePage: React.FC<HomePageProps> = ({ initialModule = 'overview' }
                         {o.waitTxt}
                       </span>
 
-                      <button
-                        onClick={() => handleNav('validation', o.nr)}
-                        className="bd"
-                        style={{
-                          minHeight: '40px',
-                          padding: '0 14px',
-                          background: '#FFFFFF',
-                          color: '#E20714',
-                          border: '1px solid #E20714',
-                          borderRadius: 0,
-                          fontWeight: 700,
-                          fontSize: '13px',
-                          textTransform: 'uppercase',
-                          letterSpacing: '0.06em',
-                          cursor: 'pointer',
-                        }}
-                      >
-                        {language === 'NL' ? 'VALIDEREN' : 'VALIDATE'}
-                      </button>
+                      {hasPermission('validation') && (
+                        <button
+                          onClick={() => handleNav('validation', o.nr)}
+                          className="bd"
+                          style={{
+                            minHeight: '40px',
+                            padding: '0 14px',
+                            background: '#FFFFFF',
+                            color: '#E20714',
+                            border: '1px solid #E20714',
+                            borderRadius: 0,
+                            fontWeight: 700,
+                            fontSize: '13px',
+                            textTransform: 'uppercase',
+                            letterSpacing: '0.06em',
+                            cursor: 'pointer',
+                          }}
+                        >
+                          {language === 'NL' ? 'VALIDEREN' : 'VALIDATE'}
+                        </button>
+                      )}
                     </div>
                   ))}
                 </div>

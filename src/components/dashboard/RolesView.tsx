@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { Pencil, Trash2 } from 'lucide-react';
+import { Pencil, Trash2, Loader2, Lock, Eye, EyeOff } from 'lucide-react';
 import { toast } from 'sonner';
 import { useTranslation } from '../../context/LanguageContext';
+import { useAuth } from '../../context/AuthContext';
 import type { Language } from '../../locales/loadLocale';
 import {
   fetchRoleModuleMatrix,
@@ -10,28 +11,37 @@ import {
   getRoleBadgeStyle,
   type RoleModuleMatrixData,
 } from '../../lib/roleModuleApi';
+import {
+  fetchUsers,
+  fetchRoles,
+  createUser,
+  updateUser,
+  deleteUser,
+  type RoleObject,
+  type CreateUserPayload,
+  type UpdateUserPayload,
+} from '../../lib/profileApi';
+import { broadcastPermissionsChanged } from '../../lib/rbac';
 
 interface RolesViewProps {
   language?: Language;
   currentUserId?: string;
-  onViewAsUser?: (user: UserRow) => void;
 }
 
 export interface UserRow {
-  id: string;
+  id: string | number;
   name: string;
   email: string;
   role: string;
+  role_id?: number;
+  created_at?: string;
+  updated_at?: string;
+  actions?: {
+    view_as?: boolean;
+    edit?: boolean;
+    delete?: boolean;
+  };
 }
-
-const INITIAL_USERS: UserRow[] = [
-  { id: 'u1', name: 'Bart Van Damme', email: 'bart.vandamme@aalterpaint.be', role: 'Managing board' },
-  { id: 'u2', name: 'Katrien Vermeulen', email: 'katrien.vermeulen@aalterpaint.be', role: 'Reviewer' },
-  { id: 'u3', name: 'Pieter De Smet', email: 'pieter.desmet@aalterpaint.be', role: 'Reviewer' },
-  { id: 'u4', name: 'Jens Goossens', email: 'jens.goossens@aalterpaint.be', role: 'Administrator' },
-  { id: 'u5', name: 'Sofie Maes', email: 'sofie.maes@aalterpaint.be', role: 'Sale' },
-  { id: 'u6', name: 'Wim Claeys', email: 'wim.claeys@aalterpaint.be', role: 'Sale' },
-];
 
 function getInitials(name: string): string {
   const parts = name.trim().split(/\s+/);
@@ -44,13 +54,20 @@ export const RolesView: React.FC<RolesViewProps> = ({
   currentUserId: propUserId,
 }) => {
   const { language: ctxLang } = useTranslation();
+  const { user: currentAuthUser, canPerformAction } = useAuth();
   const lang = propLang || ctxLang || 'NL';
   const isNl = lang === 'NL';
 
-  const [users, setUsers] = useState<UserRow[]>(INITIAL_USERS);
-  const [currentUserId] = useState<string>(propUserId || 'u1');
+  // Live Users state from GET /api/users
+  const [users, setUsers] = useState<UserRow[]>([]);
+  const [isUsersLoading, setIsUsersLoading] = useState<boolean>(true);
+  const [usersError, setUsersError] = useState<string | null>(null);
 
-  // Dynamic Role-Module Matrix state (strictly from backend API)
+  // Live Roles state from GET /api/roles
+  const [rolesList, setRolesList] = useState<RoleObject[]>([]);
+  const [, setIsRolesLoading] = useState<boolean>(true);
+
+  // Dynamic Role-Module Matrix state from GET /api/role-modules
   const [matrixData, setMatrixData] = useState<RoleModuleMatrixData>({ modules: [], roles: [] });
   const [isMatrixLoading, setIsMatrixLoading] = useState<boolean>(true);
   const [matrixError, setMatrixError] = useState<string | null>(null);
@@ -60,7 +77,54 @@ export const RolesView: React.FC<RolesViewProps> = ({
   const [isEditModalOpen, setIsEditModalOpen] = useState<boolean>(false);
   const [savingCell, setSavingCell] = useState<string | null>(null);
 
-  // Load matrix from GET /api/role-modules (deduplicated, strictly 1 network call on load)
+  // Load live users from GET /api/users
+  const loadUsers = useCallback(async (showFeedback = false) => {
+    try {
+      setIsUsersLoading(true);
+      setUsersError(null);
+      const raw = await fetchUsers(0, 100);
+      const mapped: UserRow[] = (raw || []).map((u: any) => ({
+        id: u.id,
+        name: u.name,
+        email: u.email,
+        role: u.role?.name || (typeof u.role === 'string' ? u.role : '') || (rolesList.find(r => r.id === u.role_id)?.name || 'Geen rol'),
+        role_id: u.role_id ?? u.role?.id,
+        created_at: u.created_at,
+        updated_at: u.updated_at,
+        actions: u.actions,
+      }));
+      setUsers(mapped);
+      if (showFeedback) {
+        toast.success(isNl ? 'Gebruikers succesvol geladen' : 'Users loaded successfully');
+      }
+    } catch (err: any) {
+      console.error('GET /api/users error:', err);
+      const errMsg = err?.message || (isNl ? 'Fout bij ophalen gebruikers' : 'Failed to fetch users');
+      setUsersError(errMsg);
+      if (showFeedback) {
+        toast.error(errMsg);
+      }
+    } finally {
+      setIsUsersLoading(false);
+    }
+  }, [isNl, rolesList]);
+
+  // Load roles from GET /api/roles
+  const loadRoles = useCallback(async () => {
+    try {
+      setIsRolesLoading(true);
+      const roles = await fetchRoles(0, 100);
+      if (Array.isArray(roles)) {
+        setRolesList(roles);
+      }
+    } catch (err: any) {
+      console.warn('GET /api/roles warning:', err);
+    } finally {
+      setIsRolesLoading(false);
+    }
+  }, []);
+
+  // Load matrix from GET /api/role-modules
   const loadMatrix = useCallback(async (showFeedback = false, forceRefresh = false) => {
     try {
       setIsMatrixLoading(true);
@@ -87,8 +151,12 @@ export const RolesView: React.FC<RolesViewProps> = ({
   useEffect(() => {
     if (hasFetchedRef.current) return;
     hasFetchedRef.current = true;
-    loadMatrix(false, false);
-  }, [loadMatrix]);
+    Promise.allSettled([
+      loadUsers(false),
+      loadRoles(),
+      loadMatrix(false, false),
+    ]);
+  }, [loadUsers, loadRoles, loadMatrix]);
 
   // Dialog state
   const [dialog, setDialog] = useState<
@@ -100,13 +168,19 @@ export const RolesView: React.FC<RolesViewProps> = ({
 
   const [dName, setDName] = useState('');
   const [dEmail, setDEmail] = useState('');
-  const [dRole, setDRole] = useState<string>('Managing board');
+  const [dRoleId, setDRoleId] = useState<number>(0);
+  const [dPassword, setDPassword] = useState('');
+  const [showPasswordText, setShowPasswordText] = useState(false);
   const [dErr, setDErr] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const openAdd = () => {
     setDName('');
     setDEmail('');
-    setDRole(matrixData.roles[0]?.name || 'Managing board');
+    const defaultRoleId = rolesList[0]?.id || 0;
+    setDRoleId(defaultRoleId);
+    setDPassword('');
+    setShowPasswordText(false);
     setDErr('');
     setDialog({ kind: 'add' });
   };
@@ -114,7 +188,14 @@ export const RolesView: React.FC<RolesViewProps> = ({
   const openEdit = (u: UserRow) => {
     setDName(u.name);
     setDEmail(u.email);
-    setDRole(u.role);
+    let rId = u.role_id;
+    if (!rId) {
+      const match = rolesList.find((r) => r.name.toLowerCase().trim() === (u.role || '').toLowerCase().trim());
+      rId = match?.id || rolesList[0]?.id || 0;
+    }
+    setDRoleId(rId || rolesList[0]?.id || 0);
+    setDPassword('');
+    setShowPasswordText(false);
     setDErr('');
     setDialog({ kind: 'edit', user: u });
   };
@@ -124,7 +205,9 @@ export const RolesView: React.FC<RolesViewProps> = ({
   };
 
   const closeDialog = () => {
+    if (isSubmitting) return;
     setDialog(null);
+    setDErr('');
   };
 
   // Toggle permission directly via PUT /api/role-modules
@@ -161,7 +244,6 @@ export const RolesView: React.FC<RolesViewProps> = ({
       );
     } catch (err: any) {
       console.error('Failed to update permission via PUT /api/role-modules:', err);
-      // Revert optimistic update by re-fetching live matrix from server
       try {
         const refreshed = await fetchRoleModuleMatrix(true);
         setMatrixData(refreshed);
@@ -182,7 +264,7 @@ export const RolesView: React.FC<RolesViewProps> = ({
     }
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
-        if (dialog) closeDialog();
+        if (dialog && !isSubmitting) closeDialog();
         if (isEditModalOpen && !savingCell) setIsEditModalOpen(false);
       }
     };
@@ -191,80 +273,113 @@ export const RolesView: React.FC<RolesViewProps> = ({
       document.body.style.overflow = '';
       window.removeEventListener('keydown', handleKeyDown);
     };
-  }, [dialog, isEditModalOpen, savingCell]);
+  }, [dialog, isEditModalOpen, savingCell, isSubmitting]);
 
-  const handleSaveUser = () => {
+  // Form submission: POST /api/users or PUT /api/users/{id}
+  const handleSaveUser = async () => {
     if (!dName.trim()) {
       setDErr(isNl ? 'Naam is verplicht' : 'Name is required');
       return;
     }
-    if (!dEmail.trim() || !dEmail.includes('@')) {
-      setDErr(isNl ? 'Geldig e-mailadres is verplicht' : 'Valid email is required');
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!dEmail.trim() || !emailRegex.test(dEmail.trim())) {
+      setDErr(isNl ? 'Geldig e-mailadres is verplicht' : 'Valid email address is required');
+      return;
+    }
+    if (!dRoleId || dRoleId <= 0) {
+      setDErr(isNl ? 'Selecteer een geldige rol' : 'Please select a valid role');
+      return;
+    }
+    if (dialog?.kind === 'add' && !dPassword.trim()) {
+      setDErr(isNl ? 'Wachtwoord is verplicht' : 'Password is required');
+      return;
+    }
+    if (dPassword.trim() && dPassword.trim().length < 6) {
+      setDErr(isNl ? 'Wachtwoord moet minimaal 6 tekens bevatten' : 'Password must be at least 6 characters');
       return;
     }
 
-    if (dialog?.kind === 'add') {
-      const newUser: UserRow = {
-        id: `u${Date.now()}`,
-        name: dName.trim(),
-        email: dEmail.trim(),
-        role: dRole,
-      };
-      setUsers((prev) => [...prev, newUser]);
-      toast.success(
-        isNl
-          ? `Gebruiker ${newUser.name} toegevoegd als ${newUser.role}`
-          : `User ${newUser.name} added as ${newUser.role}`
-      );
-      closeDialog();
-    } else if (dialog?.kind === 'edit') {
-      const updatedUser: UserRow = {
-        ...dialog.user,
-        name: dName.trim(),
-        email: dEmail.trim(),
-        role: dRole,
-      };
-      setUsers((prev) =>
-        prev.map((u) => (u.id === updatedUser.id ? updatedUser : u))
-      );
-      toast.success(
-        isNl
-          ? `Gegevens van ${updatedUser.name} opgeslagen`
-          : `Details for ${updatedUser.name} saved`
-      );
-      closeDialog();
+    setIsSubmitting(true);
+    setDErr('');
+
+    try {
+      if (dialog?.kind === 'add') {
+        const payload: CreateUserPayload = {
+          name: dName.trim(),
+          email: dEmail.trim(),
+          role_id: Number(dRoleId),
+          password: dPassword.trim(),
+        };
+
+        const created = await createUser(payload);
+        toast.success(
+          isNl
+            ? `Gebruiker ${created.name} succesvol aangemaakt`
+            : `User ${created.name} created successfully`
+        );
+        closeDialog();
+        await loadUsers(false);
+      } else if (dialog?.kind === 'edit') {
+        const payload: UpdateUserPayload = {
+          name: dName.trim(),
+          email: dEmail.trim(),
+          role_id: Number(dRoleId),
+          ...(dPassword.trim() ? { password: dPassword.trim() } : {}),
+        };
+
+        const updated = await updateUser(dialog.user.id, payload);
+        broadcastPermissionsChanged();
+        toast.success(
+          isNl
+            ? `Gegevens van ${updated.name} succesvol opgeslagen`
+            : `Details for ${updated.name} saved successfully`
+        );
+        closeDialog();
+        await loadUsers(false);
+      }
+    } catch (err: any) {
+      console.error('Save user error:', err);
+      const errMsg = err?.message || (isNl ? 'Fout bij opslaan gebruiker' : 'Failed to save user');
+      setDErr(errMsg);
+      toast.error(errMsg);
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
-  const handleDeleteUser = () => {
-    if (dialog?.kind === 'del') {
-      const target = dialog.user;
-      setUsers((prev) => prev.filter((u) => u.id !== target.id));
+  // Delete user: DELETE /api/users/{id}
+  const handleDeleteUser = async () => {
+    if (dialog?.kind !== 'del') return;
+    const target = dialog.user;
+    setIsSubmitting(true);
+    try {
+      await deleteUser(target.id);
+      broadcastPermissionsChanged();
       toast.success(
         isNl
-          ? `Gebruiker ${target.name} verwijderd`
-          : `User ${target.name} deleted`
+          ? `Gebruiker ${target.name} succesvol verwijderd`
+          : `User ${target.name} deleted successfully`
       );
       closeDialog();
+      await loadUsers(false);
+    } catch (err: any) {
+      console.error('Delete user error:', err);
+      const errMsg = err?.message || (isNl ? 'Fout bij verwijderen gebruiker' : 'Failed to delete user');
+      toast.error(errMsg);
+    } finally {
+      setIsSubmitting(false);
     }
   };
-
-  /* const handleViewAs = (u: UserRow) => {
-    setCurrentUserId(u.id);
-    if (onViewAsUser) onViewAsUser(u);
-    toast.info(
-      isNl
-        ? `Je bekijkt de interface nu als ${u.name} (${u.role})`
-        : `You are now viewing the interface as ${u.name} (${u.role})`
-    );
-  }; */
 
   // Compute live dynamic modules for dialog role preview from backend data
-  const matchedDialogRole = matrixData.roles.find(
-    (r) => r.name.toLowerCase().trim() === dRole.toLowerCase().trim()
+  const selectedRole = rolesList.find((r) => r.id === dRoleId);
+  const selectedRoleInMatrix = matrixData.roles.find(
+    (r) =>
+      r.id === dRoleId ||
+      (selectedRole && r.name.toLowerCase().trim() === selectedRole.name.toLowerCase().trim())
   );
-  const dialogMods = matchedDialogRole
-    ? matchedDialogRole.modules.filter((m) => m.has_access)
+  const dialogMods = selectedRoleInMatrix
+    ? selectedRoleInMatrix.modules.filter((m) => m.has_access)
     : [];
 
   return (
@@ -273,13 +388,12 @@ export const RolesView: React.FC<RolesViewProps> = ({
       <div
         style={{
           display: 'flex',
-          flexWrap: 'wrap',
-          alignItems: 'flex-end',
+          alignItems: 'flex-start',
           justifyContent: 'space-between',
-          gap: '12px',
+          gap: '20px',
         }}
       >
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', flex: 1, minWidth: 0 }}>
           <h1
             style={{
               margin: 0,
@@ -292,7 +406,7 @@ export const RolesView: React.FC<RolesViewProps> = ({
           >
             {isNl ? 'Rollen en toegang' : 'Roles and access'}
           </h1>
-          <p style={{ margin: 0, color: '#4D4D4D' }}>
+          <p style={{ margin: 0, color: '#4D4D4D', lineHeight: 1.5, maxWidth: '780px' }}>
             {isNl
               ? 'Een rol bepaalt welke modules iemand ziet. Wijzig een rol en de modules passen meteen aan; met Bekijk als zie je het menu van die gebruiker.'
               : "A role determines which modules someone sees. Changing a role updates modules immediately; with 'View as' you see that user's menu."}
@@ -300,10 +414,23 @@ export const RolesView: React.FC<RolesViewProps> = ({
         </div>
 
         <button
+          type="button"
           className="ap-add-user-btn"
           onClick={openAdd}
+          style={{
+            flexShrink: 0,
+            whiteSpace: 'nowrap',
+            marginTop: '2px',
+            height: '32px',
+            minHeight: '32px',
+            padding: '0 14px',
+            fontSize: '11.5px',
+            fontWeight: 700,
+            letterSpacing: '0.04em',
+            borderRadius: '4px',
+          }}
         >
-          {isNl ? 'Gebruiker toevoegen' : 'Add user'}
+          {isNl ? 'GEBRUIKER TOEVOEGEN' : 'ADD USER'}
         </button>
       </div>
 
@@ -316,13 +443,13 @@ export const RolesView: React.FC<RolesViewProps> = ({
           borderRadius: 0,
         }}
       >
-        <div style={{ minWidth: '880px' }}>
+        <div style={{ minWidth: '950px' }}>
           {/* Table Header */}
           <div
             style={{
               display: 'grid',
               gridTemplateColumns:
-                'minmax(200px, 1.3fr) 116px minmax(220px, 2fr) 104px minmax(190px, 1.2fr)',
+                'minmax(180px, 1.1fr) 130px minmax(280px, 2.5fr) 110px 220px',
               gap: '12px',
               padding: '10px 16px',
               borderBottom: '1px solid #DADADA',
@@ -339,15 +466,68 @@ export const RolesView: React.FC<RolesViewProps> = ({
             <span>{isNl ? 'Acties' : 'Actions'}</span>
           </div>
 
+          {/* Loading State */}
+          {isUsersLoading && (
+            <div style={{ padding: '36px 20px', textAlign: 'center', color: '#6B7280', fontSize: '14px' }}>
+              <div style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
+                <Loader2 size={16} className="animate-spin" />
+                <span>{isNl ? 'Gebruikers laden...' : 'Loading users...'}</span>
+              </div>
+            </div>
+          )}
+
+          {/* Error State */}
+          {!isUsersLoading && usersError && (
+            <div style={{ padding: '24px 20px', textAlign: 'center', color: '#DC2626', fontSize: '14px', background: '#FEF2F2' }}>
+              <p style={{ margin: '0 0 8px 0', fontWeight: 600 }}>{usersError}</p>
+              <button
+                type="button"
+                onClick={() => loadUsers(true)}
+                style={{
+                  padding: '6px 14px',
+                  background: '#FFFFFF',
+                  border: '1px solid #FCA5A5',
+                  borderRadius: '4px',
+                  color: '#DC2626',
+                  fontSize: '12px',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                }}
+              >
+                {isNl ? 'Opnieuw proberen' : 'Retry'}
+              </button>
+            </div>
+          )}
+
+          {/* Empty State */}
+          {!isUsersLoading && !usersError && users.length === 0 && (
+            <div style={{ padding: '48px 20px', textAlign: 'center', color: '#6B7280', fontSize: '14px' }}>
+              <p style={{ margin: '0 0 12px 0' }}>{isNl ? 'Geen gebruikers gevonden.' : 'No users found.'}</p>
+              <button
+                type="button"
+                className="ap-add-user-btn"
+                onClick={openAdd}
+                style={{ minHeight: '36px', padding: '0 16px', fontSize: '12px' }}
+              >
+                {isNl ? 'GEBRUIKER TOEVOEGEN' : 'ADD USER'}
+              </button>
+            </div>
+          )}
+
           {/* User Rows */}
-          {users.map((u) => {
-            const isMe = u.id === currentUserId;
+          {!isUsersLoading && !usersError && users.map((u) => {
+            const isMe =
+              (currentAuthUser?.email && u.email && u.email.toLowerCase() === currentAuthUser.email.toLowerCase()) ||
+              String(u.id) === String(currentAuthUser?.id) ||
+              String(u.id) === String(propUserId);
             const badgeStyle = getRoleBadgeStyle(u.role);
-            const roleLabel = u.role;
+            const roleLabel = u.role || (isNl ? 'Geen rol' : 'No role');
 
             // Locate role permissions dynamically in live matrixData
             const matchedRole = matrixData.roles.find(
-              (r) => r.name.toLowerCase().trim() === (u.role || '').toLowerCase().trim()
+              (r) =>
+                (u.role_id && r.id === u.role_id) ||
+                r.name.toLowerCase().trim() === (u.role || '').toLowerCase().trim()
             );
 
             const allowedMods = matchedRole
@@ -364,14 +544,21 @@ export const RolesView: React.FC<RolesViewProps> = ({
                 style={{
                   display: 'grid',
                   gridTemplateColumns:
-                    'minmax(200px, 1.3fr) 116px minmax(220px, 2fr) 104px minmax(190px, 1.2fr)',
+                    'minmax(180px, 1.1fr) 130px minmax(280px, 2.5fr) 110px 220px',
                   gap: '12px',
                   padding: '12px 16px',
-                  borderBottom: '1px solid #EBEBEB',
+                  borderBottom: '1px solid #E2E8F0',
+                  borderLeft: isMe ? '3px solid #E20714' : '3px solid transparent',
                   alignItems: 'center',
                   fontSize: '14px',
-                  background: isMe ? '#FFFBEA' : '#FFFFFF',
+                  background: isMe ? '#FFFDFD' : '#FFFFFF',
                   transition: 'background 0.15s ease',
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.backgroundColor = isMe ? '#FFF5F5' : '#F8FAFC';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.backgroundColor = isMe ? '#FFFDFD' : '#FFFFFF';
                 }}
               >
                 {/* User Avatar + Name & Email */}
@@ -381,8 +568,8 @@ export const RolesView: React.FC<RolesViewProps> = ({
                     style={{
                       width: '32px',
                       height: '32px',
-                      borderRadius: '50%',
-                      background: '#242424',
+                      borderRadius: '8px',
+                      background: '#0F172A',
                       color: '#FFFFFF',
                       display: 'flex',
                       alignItems: 'center',
@@ -395,10 +582,10 @@ export const RolesView: React.FC<RolesViewProps> = ({
                     {getInitials(u.name)}
                   </span>
                   <span style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
-                    <span style={{ fontWeight: 700, color: '#1A1A1A' }}>
-                      {u.name} {isMe && (isNl ? '(jij)' : '(you)')}
+                    <span style={{ fontWeight: 700, color: '#0F172A', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{u.name}</span>
                     </span>
-                    <span style={{ fontSize: '12px', color: '#4D4D4D' }}>{u.email}</span>
+                    <span style={{ fontSize: '12px', color: '#64748B', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{u.email}</span>
                   </span>
                 </span>
 
@@ -412,7 +599,9 @@ export const RolesView: React.FC<RolesViewProps> = ({
                       padding: '3px 10px',
                       background: badgeStyle[0],
                       color: badgeStyle[1],
-                      borderRadius: '2px',
+                      border: `1px solid ${badgeStyle[2] || 'transparent'}`,
+                      borderRadius: '4px',
+                      whiteSpace: 'nowrap',
                     }}
                   >
                     {roleLabel}
@@ -426,19 +615,21 @@ export const RolesView: React.FC<RolesViewProps> = ({
                       <span
                         key={mod.module_id || mod.key}
                         style={{
-                          fontSize: '12px',
+                          fontSize: '11.5px',
                           padding: '2px 7px',
-                          border: '1px solid #C9C9C9',
-                          background: '#FFFFFF',
-                          borderRadius: '2px',
-                          color: '#242424',
+                          border: '1px solid #E2E8F0',
+                          background: '#F8FAFC',
+                          borderRadius: '4px',
+                          color: '#334155',
+                          fontWeight: 500,
+                          lineHeight: 1.3,
                         }}
                       >
                         {mod.name}
                       </span>
                     ))
                   ) : (
-                    <span style={{ fontSize: '12px', color: '#8C8C8C', fontStyle: 'italic' }}>
+                    <span style={{ fontSize: '12px', color: '#94A3B8', fontStyle: 'italic' }}>
                       {isNl ? 'Geen modules' : 'No modules'}
                     </span>
                   )}
@@ -449,45 +640,29 @@ export const RolesView: React.FC<RolesViewProps> = ({
                   {hasSettings ? (
                     <span
                       style={{
+                        display: 'inline-block',
                         fontSize: '12px',
                         fontWeight: 600,
                         padding: '3px 10px',
-                        background: '#FFF3B8',
-                        color: '#5C4A00',
-                        borderRadius: '2px',
+                        background: '#FEF3C7',
+                        color: '#92400E',
+                        border: '1px solid #FDE68A',
+                        borderRadius: '4px',
+                        whiteSpace: 'nowrap',
                       }}
                     >
                       {isNl ? 'Instellingen' : 'Settings'}
                     </span>
                   ) : (
-                    <span style={{ fontSize: '13px', color: '#6B6B6B' }}>
+                    <span style={{ fontSize: '13px', color: '#64748B', whiteSpace: 'nowrap' }}>
                       {isNl ? 'Geen toegang' : 'No access'}
                     </span>
                   )}
                 </span>
 
-                {/* Action Buttons */}
-                <span style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-                  {/* <button
-                    className="bg"
-                    onClick={() => handleViewAs(u)}
-                    disabled={isMe}
-                    style={{
-                      minHeight: '36px',
-                      padding: '0 10px',
-                      border: '1px solid #C9C9C9',
-                      background: '#FFFFFF',
-                      borderRadius: 0,
-                      fontSize: '13px',
-                      fontWeight: 700,
-                      textTransform: 'uppercase',
-                      letterSpacing: '0.06em',
-                      cursor: isMe ? 'not-allowed' : 'pointer',
-                      opacity: isMe ? 0.45 : 1,
-                    }}
-                  >
-                    {isNl ? 'Bekijk als' : 'View as'}
-                  </button> */}
+                {/* Action Buttons: side by side, never wrap */}
+                <span style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'nowrap' }}>
+
                   <button
                     type="button"
                     className="bg"
@@ -496,86 +671,95 @@ export const RolesView: React.FC<RolesViewProps> = ({
                     style={{
                       display: 'inline-flex',
                       alignItems: 'center',
-                      gap: '6px',
-                      height: '34px',
-                      padding: '0 12px',
-                      border: '1px solid #D1D5DB',
+                      gap: '5px',
+                      height: '30px',
+                      padding: '0 8px',
+                      border: '1px solid #CBD5E1',
                       background: '#FFFFFF',
-                      borderRadius: '6px',
-                      fontSize: '12px',
+                      borderRadius: '5px',
+                      fontSize: '11px',
                       fontWeight: 600,
-                      color: '#1F2937',
+                      color: '#1E293B',
                       textTransform: 'uppercase',
                       letterSpacing: '0.04em',
                       cursor: 'pointer',
+                      whiteSpace: 'nowrap',
                       boxShadow: '0 1px 2px rgba(0, 0, 0, 0.04)',
                       transition: 'all 0.15s ease',
+                      flexShrink: 0,
                     }}
                     onMouseEnter={(e) => {
-                      e.currentTarget.style.borderColor = '#111827';
-                      e.currentTarget.style.background = '#F9FAFB';
-                      e.currentTarget.style.color = '#111827';
-                      e.currentTarget.style.boxShadow = '0 2px 4px rgba(0, 0, 0, 0.08)';
+                      e.currentTarget.style.borderColor = '#0F172A';
+                      e.currentTarget.style.background = '#F8FAFC';
+                      e.currentTarget.style.color = '#0F172A';
                     }}
                     onMouseLeave={(e) => {
-                      e.currentTarget.style.borderColor = '#D1D5DB';
+                      e.currentTarget.style.borderColor = '#CBD5E1';
                       e.currentTarget.style.background = '#FFFFFF';
-                      e.currentTarget.style.color = '#1F2937';
-                      e.currentTarget.style.boxShadow = '0 1px 2px rgba(0, 0, 0, 0.04)';
+                      e.currentTarget.style.color = '#1E293B';
                     }}
                   >
-                    <Pencil size={13} style={{ strokeWidth: 2.2, color: 'currentColor' }} />
+                    <Pencil size={12} style={{ strokeWidth: 2.2, color: 'currentColor' }} />
                     <span>{isNl ? 'Bewerken' : 'Edit'}</span>
                   </button>
-                  <button
-                    type="button"
-                    className="bg"
-                    onClick={() => openDel(u)}
-                    disabled={isMe}
-                    title={
-                      isMe
-                        ? (isNl ? 'Je kunt je eigen account niet verwijderen' : 'You cannot delete your own account')
-                        : (isNl ? 'Gebruiker verwijderen' : 'Delete user')
-                    }
-                    style={{
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: '6px',
-                      height: '34px',
-                      padding: '0 12px',
-                      border: isMe ? '1px solid #E5E7EB' : '1px solid #FECACA',
-                      background: isMe ? '#F9FAFB' : '#FEF2F2',
-                      borderRadius: '6px',
-                      fontSize: '12px',
-                      fontWeight: 600,
-                      color: isMe ? '#9CA3AF' : '#DC2626',
-                      textTransform: 'uppercase',
-                      letterSpacing: '0.04em',
-                      cursor: isMe ? 'not-allowed' : 'pointer',
-                      opacity: isMe ? 0.6 : 1,
-                      boxShadow: isMe ? 'none' : '0 1px 2px rgba(220, 38, 38, 0.05)',
-                      transition: 'all 0.15s ease',
-                    }}
-                    onMouseEnter={(e) => {
-                      if (!isMe) {
-                        e.currentTarget.style.borderColor = '#F87171';
-                        e.currentTarget.style.background = '#FEE2E2';
-                        e.currentTarget.style.color = '#B91C1C';
-                        e.currentTarget.style.boxShadow = '0 2px 5px rgba(220, 38, 38, 0.15)';
-                      }
-                    }}
-                    onMouseLeave={(e) => {
-                      if (!isMe) {
-                        e.currentTarget.style.borderColor = '#FECACA';
-                        e.currentTarget.style.background = '#FEF2F2';
-                        e.currentTarget.style.color = '#DC2626';
-                        e.currentTarget.style.boxShadow = '0 1px 2px rgba(220, 38, 38, 0.05)';
-                      }
-                    }}
-                  >
-                    <Trash2 size={13} style={{ strokeWidth: 2.2, color: 'currentColor' }} />
-                    <span>{isNl ? 'Verwijderen' : 'Delete'}</span>
-                  </button>
+
+                  {(() => {
+                    const canDelete = canPerformAction('delete', u);
+                    const isDeleteDisabled = !canDelete;
+                    const deleteTitle = isMe
+                      ? (isNl ? 'Je kunt je eigen account niet verwijderen' : 'You cannot delete your own account')
+                      : !canDelete
+                      ? (isNl ? 'Deze gebruiker kan niet worden verwijderd (beveiligde rol)' : 'This user cannot be deleted (protected role)')
+                      : (isNl ? 'Gebruiker verwijderen' : 'Delete user');
+
+                    return (
+                      <button
+                        type="button"
+                        className="bg"
+                        onClick={() => openDel(u)}
+                        disabled={isDeleteDisabled}
+                        title={deleteTitle}
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '5px',
+                          height: '30px',
+                          padding: '0 8px',
+                          border: isDeleteDisabled ? '1px solid #E2E8F0' : '1px solid #FECACA',
+                          background: isDeleteDisabled ? '#F8FAFC' : '#FEF2F2',
+                          borderRadius: '5px',
+                          fontSize: '11px',
+                          fontWeight: 600,
+                          color: isDeleteDisabled ? '#94A3B8' : '#DC2626',
+                          textTransform: 'uppercase',
+                          letterSpacing: '0.04em',
+                          cursor: isDeleteDisabled ? 'not-allowed' : 'pointer',
+                          opacity: isDeleteDisabled ? 0.6 : 1,
+                          whiteSpace: 'nowrap',
+                          boxShadow: isDeleteDisabled ? 'none' : '0 1px 2px rgba(220, 38, 38, 0.05)',
+                          transition: 'all 0.15s ease',
+                          flexShrink: 0,
+                        }}
+                        onMouseEnter={(e) => {
+                          if (!isDeleteDisabled) {
+                            e.currentTarget.style.borderColor = '#F87171';
+                            e.currentTarget.style.background = '#FEE2E2';
+                            e.currentTarget.style.color = '#B91C1C';
+                          }
+                        }}
+                        onMouseLeave={(e) => {
+                          if (!isDeleteDisabled) {
+                            e.currentTarget.style.borderColor = '#FECACA';
+                            e.currentTarget.style.background = '#FEF2F2';
+                            e.currentTarget.style.color = '#DC2626';
+                          }
+                        }}
+                      >
+                        <Trash2 size={12} style={{ strokeWidth: 2.2, color: 'currentColor' }} />
+                        <span>{isNl ? 'Verwijderen' : 'Delete'}</span>
+                      </button>
+                    );
+                  })()}
                 </span>
               </div>
             );
@@ -648,15 +832,30 @@ export const RolesView: React.FC<RolesViewProps> = ({
             )}
           </div>
 
-          {/* Edit Permissions Button (Black by default, Vibrant Red on hover) */}
+          {/* Edit Permissions Button (Black by default, Vibrant Red on hover - matches Add User button) */}
           <button
             type="button"
             className="ap-edit-permissions-btn"
             onClick={() => setIsEditModalOpen(true)}
+            style={{
+              flexShrink: 0,
+              whiteSpace: 'nowrap',
+              height: '32px',
+              minHeight: '32px',
+              padding: '0 14px',
+              fontSize: '11.5px',
+              fontWeight: 700,
+              letterSpacing: '0.04em',
+              borderRadius: '4px',
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '6px',
+            }}
           >
             <svg
-              width="14"
-              height="14"
+              width="13"
+              height="13"
               viewBox="0 0 24 24"
               fill="none"
               stroke="#FFFFFF"
@@ -668,7 +867,7 @@ export const RolesView: React.FC<RolesViewProps> = ({
               <path d="M12 20h9" />
               <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
             </svg>
-            <span>{isNl ? 'Rechten bewerken' : 'Edit permissions'}</span>
+            <span>{isNl ? 'RECHTEN BEWERKEN' : 'EDIT PERMISSIONS'}</span>
           </button>
         </div>
 
@@ -830,6 +1029,12 @@ export const RolesView: React.FC<RolesViewProps> = ({
             className="ap-modal-card"
             role="dialog"
             aria-modal="true"
+            style={{
+              width: '380px',
+              maxWidth: 'calc(100vw - 24px)',
+              padding: '16px 18px',
+              borderRadius: '8px',
+            }}
           >
             {/* Top Close Button */}
             <button
@@ -837,8 +1042,9 @@ export const RolesView: React.FC<RolesViewProps> = ({
               className="ap-modal-close-btn"
               onClick={closeDialog}
               aria-label={isNl ? 'Sluiten' : 'Close'}
+              style={{ top: '12px', right: '12px', width: '26px', height: '26px' }}
             >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
                 <line x1="18" y1="6" x2="6" y2="18" />
                 <line x1="6" y1="6" x2="18" y2="18" />
               </svg>
@@ -847,11 +1053,11 @@ export const RolesView: React.FC<RolesViewProps> = ({
             {/* Modal Title */}
             <h2
               style={{
-                margin: '0 0 16px 0',
-                paddingRight: '32px',
+                margin: '0 0 12px 0',
+                paddingRight: '28px',
                 fontFamily: "'Archivo', system-ui, sans-serif",
                 fontWeight: 700,
-                fontSize: '18px',
+                fontSize: '16px',
                 lineHeight: 1.25,
                 color: '#111827',
                 letterSpacing: '-0.01em',
@@ -872,18 +1078,22 @@ export const RolesView: React.FC<RolesViewProps> = ({
 
             {/* Form for Add / Edit */}
             {dialog.kind !== 'del' ? (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '9px' }}>
                 <label
                   style={{
                     display: 'flex',
                     flexDirection: 'column',
-                    gap: '4px',
-                    fontSize: '12.5px',
-                    fontWeight: 600,
-                    color: '#374151',
+                    gap: '3px',
+                    fontSize: '10.5px',
+                    fontWeight: 700,
+                    color: '#4B5563',
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.04em',
                   }}
                 >
-                  {isNl ? 'Naam' : 'Name'}
+                  <span>
+                    {isNl ? 'Naam' : 'Name'} <span style={{ color: '#E20714' }}>*</span>
+                  </span>
                   <input
                     type="text"
                     value={dName}
@@ -893,6 +1103,7 @@ export const RolesView: React.FC<RolesViewProps> = ({
                     }}
                     placeholder={isNl ? 'bv. Lien Desmet' : 'e.g. Lien Desmet'}
                     className="ap-modal-input"
+                    style={{ height: '34px', fontSize: '13px', padding: '0 10px', borderRadius: '6px' }}
                     autoFocus
                   />
                 </label>
@@ -901,13 +1112,17 @@ export const RolesView: React.FC<RolesViewProps> = ({
                   style={{
                     display: 'flex',
                     flexDirection: 'column',
-                    gap: '4px',
-                    fontSize: '12.5px',
-                    fontWeight: 600,
-                    color: '#374151',
+                    gap: '3px',
+                    fontSize: '10.5px',
+                    fontWeight: 700,
+                    color: '#4B5563',
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.04em',
                   }}
                 >
-                  {isNl ? 'E-mailadres' : 'Email address'}
+                  <span>
+                    {isNl ? 'E-mailadres' : 'Email address'} <span style={{ color: '#E20714' }}>*</span>
+                  </span>
                   <input
                     type="email"
                     value={dEmail}
@@ -917,6 +1132,7 @@ export const RolesView: React.FC<RolesViewProps> = ({
                     }}
                     placeholder={isNl ? 'voornaam.naam@aalterpaint.be' : 'firstname.lastname@aalterpaint.be'}
                     className="ap-modal-input"
+                    style={{ height: '34px', fontSize: '13px', padding: '0 10px', borderRadius: '6px' }}
                   />
                 </label>
 
@@ -924,67 +1140,126 @@ export const RolesView: React.FC<RolesViewProps> = ({
                   style={{
                     display: 'flex',
                     flexDirection: 'column',
-                    gap: '4px',
-                    fontSize: '12.5px',
-                    fontWeight: 600,
-                    color: '#374151',
+                    gap: '3px',
+                    fontSize: '10.5px',
+                    fontWeight: 700,
+                    color: '#4B5563',
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.04em',
                   }}
                 >
-                  {isNl ? 'Rol' : 'Role'}
+                  <span>
+                    {isNl ? 'Rol' : 'Role'} <span style={{ color: '#E20714' }}>*</span>
+                  </span>
                   <select
-                    value={dRole}
-                    onChange={(e) => setDRole(e.target.value)}
+                    value={dRoleId}
+                    onChange={(e) => setDRoleId(Number(e.target.value))}
                     className="ap-modal-select"
+                    style={{ height: '34px', fontSize: '13px', padding: '0 10px', borderRadius: '6px' }}
                   >
-                    {matrixData.roles.map((r) => (
-                      <option key={r.id || r.name} value={r.name}>
+                    {rolesList.map((r) => (
+                      <option key={r.id} value={r.id}>
                         {r.name}
                       </option>
                     ))}
                   </select>
                 </label>
 
-                {/* Modules preview for selected role */}
+                {/* Modules preview for selected role (matching Image 3 reference) */}
                 <div
                   style={{
                     display: 'flex',
                     flexDirection: 'column',
-                    gap: '6px',
-                    padding: '9px 12px',
+                    gap: '4px',
+                    padding: '7px 10px',
                     background: '#F9FAFB',
                     border: '1px solid #E5E7EB',
                     borderRadius: '6px',
                   }}
                 >
-                  <span style={{ fontSize: '11px', fontWeight: 700, color: '#4B5563', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-                    {isNl ? 'Modules voor deze rol' : 'Modules for this role'}
+                  <span style={{ fontSize: '10px', fontWeight: 700, color: '#4B5563', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                    {isNl ? 'MODULES VOOR DEZE ROL' : 'MODULES FOR THIS ROLE'}
                   </span>
-                  <span style={{ display: 'flex', flexWrap: 'wrap', gap: '5px' }}>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
                     {dialogMods.length > 0 ? (
                       dialogMods.map((dm) => (
                         <span
                           key={dm.module_id || dm.key}
                           className="ap-modal-badge"
+                          style={{ fontSize: '10.5px', padding: '2px 6px', borderRadius: '4px' }}
                         >
                           {dm.name}
                         </span>
                       ))
                     ) : (
-                      <span style={{ fontSize: '12px', color: '#6B7280', fontStyle: 'italic' }}>
+                      <span style={{ fontSize: '11px', color: '#6B7280', fontStyle: 'italic' }}>
                         {isNl ? 'Geen modules toegewezen' : 'No modules assigned'}
                       </span>
                     )}
-                  </span>
+                  </div>
+                </div>
+
+                {/* Password field with Lock icon & Eye toggle matching Image 2 */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                  <label
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      fontSize: '10.5px',
+                      fontWeight: 700,
+                      color: '#4B5563',
+                      textTransform: 'uppercase',
+                      letterSpacing: '0.04em',
+                    }}
+                  >
+                    <span>
+                      {isNl ? 'Wachtwoord' : 'Password'}{' '}
+                      {dialog.kind === 'add' ? (
+                        <span style={{ color: '#E20714' }}>*</span>
+                      ) : (
+                        <span style={{ fontSize: '10.5px', fontWeight: 500, color: '#9CA3AF', textTransform: 'none' }}>
+                          ({isNl ? 'laat leeg om te behouden' : 'leave blank to keep current'})
+                        </span>
+                      )}
+                    </span>
+                  </label>
+                  <div className="ap-password-pill-container">
+                    <Lock size={16} strokeWidth={1.75} style={{ color: '#94A3B8', flexShrink: 0, marginRight: '10px' }} />
+                    <input
+                      type={showPasswordText ? 'text' : 'password'}
+                      value={dPassword}
+                      onChange={(e) => setDPassword(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') handleSaveUser();
+                      }}
+                      placeholder={
+                        dialog.kind === 'add'
+                          ? (isNl ? 'Voer veilig wachtwoord in...' : 'Enter secure password...')
+                          : (isNl ? 'Nieuw wachtwoord invoeren (optioneel)...' : 'Enter secure password...')
+                      }
+                      className="ap-password-pill-input"
+                    />
+                    <button
+                      type="button"
+                      className="ap-password-pill-btn"
+                      onClick={() => setShowPasswordText(!showPasswordText)}
+                      aria-label={showPasswordText ? 'Hide password' : 'Show password'}
+                      title={showPasswordText ? (isNl ? 'Verberg wachtwoord' : 'Hide password') : (isNl ? 'Toon wachtwoord' : 'Show password')}
+                    >
+                      {showPasswordText ? <EyeOff size={17} strokeWidth={1.75} /> : <Eye size={17} strokeWidth={1.75} />}
+                    </button>
+                  </div>
                 </div>
 
                 {dErr && (
                   <div
                     style={{
-                      padding: '6px 10px',
+                      padding: '5px 8px',
                       background: '#FEF2F2',
                       border: '1px solid #FCA5A5',
                       borderRadius: '4px',
-                      fontSize: '12px',
+                      fontSize: '11px',
                       color: '#B91C1C',
                       fontWeight: 600,
                     }}
@@ -995,7 +1270,7 @@ export const RolesView: React.FC<RolesViewProps> = ({
               </div>
             ) : (
               /* Delete confirmation */
-              <div style={{ padding: '6px 0 10px 0', fontSize: '14px', color: '#1F2937', lineHeight: 1.5 }}>
+              <div style={{ padding: '4px 0 8px 0', fontSize: '13px', color: '#1F2937', lineHeight: 1.45 }}>
                 {isNl
                   ? `Ben je zeker dat je ${dialog.user.name} wil verwijderen?`
                   : `Are you sure you want to delete ${dialog.user.name}?`}
@@ -1008,14 +1283,22 @@ export const RolesView: React.FC<RolesViewProps> = ({
                 display: 'flex',
                 justifyContent: 'flex-end',
                 alignItems: 'center',
-                gap: '10px',
-                marginTop: '18px',
+                gap: '8px',
+                marginTop: '14px',
               }}
             >
               <button
                 type="button"
                 className="ap-btn-cancel"
                 onClick={closeDialog}
+                disabled={isSubmitting}
+                style={{
+                  height: '32px',
+                  minHeight: '32px',
+                  padding: '0 14px',
+                  fontSize: '11px',
+                  borderRadius: '5px',
+                }}
               >
                 {isNl ? 'ANNULEREN' : 'CANCEL'}
               </button>
@@ -1023,17 +1306,29 @@ export const RolesView: React.FC<RolesViewProps> = ({
                 type="button"
                 className="ap-btn-save"
                 onClick={dialog.kind === 'del' ? handleDeleteUser : handleSaveUser}
+                disabled={isSubmitting}
                 style={{
+                  height: '32px',
+                  minHeight: '32px',
+                  padding: '0 16px',
+                  fontSize: '11px',
+                  borderRadius: '5px',
                   background: dialog.kind === 'del' ? '#B91C1C' : '#E20714',
+                  opacity: isSubmitting ? 0.7 : 1,
+                  cursor: isSubmitting ? 'not-allowed' : 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '5px',
                 }}
               >
-                {dialog.kind === 'del'
-                  ? isNl
-                    ? 'VERWIJDEREN'
-                    : 'DELETE'
-                  : isNl
-                  ? 'OPSLAAN'
-                  : 'SAVE'}
+                {isSubmitting && <Loader2 size={12} className="animate-spin" />}
+                <span>
+                  {isSubmitting
+                    ? (isNl ? 'BEZIG...' : 'SAVING...')
+                    : (dialog.kind === 'del'
+                        ? (isNl ? 'VERWIJDEREN' : 'DELETE')
+                        : (isNl ? 'OPSLAAN' : 'SAVE'))}
+                </span>
               </button>
             </div>
           </div>

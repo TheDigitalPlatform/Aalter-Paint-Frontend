@@ -9,6 +9,7 @@ import {
   getInitials,
   type UserRow,
 } from '../../lib/profileApi';
+import { getRoleBadgeStyle } from '../../lib/roleModuleApi';
 import { toast } from 'sonner';
 
 const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -45,7 +46,7 @@ export const ProfileView: React.FC = () => {
       updateUser({
         name: data.name,
         email: data.email,
-        role: (roleStr ? roleStr.toLowerCase() : userRoleRef.current) as any,
+        role: roleStr || userRoleRef.current,
         status: data.status || (data.is_active === false ? 'Inactive' : 'Active'),
       });
     } catch (err: any) {
@@ -378,25 +379,30 @@ export const ProfileView: React.FC = () => {
                     {profile.name || user?.name || (isNl ? 'Gebruiker' : 'User')}
                   </h2>
 
-                  {/* Role Badge in Brand Red Theme */}
-                  <div
-                    style={{
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: '5px',
-                      background: '#FCE8E8',
-                      border: '1px solid #F5C2C2',
-                      borderRadius: '6px',
-                      padding: '3px 9px',
-                      color: '#E20714',
-                      fontSize: '11px',
-                      fontWeight: 700,
-                      alignSelf: 'flex-start',
-                    }}
-                  >
-                    <Shield size={12} strokeWidth={2.4} style={{ color: '#E20714' }} />
-                    <span>{roleDisplay}</span>
-                  </div>
+                  {/* Role Badge dynamically styled to match Roles UI palette */}
+                  {(() => {
+                    const [badgeBg, badgeColor, badgeBorder] = getRoleBadgeStyle(roleName || roleDisplay);
+                    return (
+                      <div
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '5px',
+                          background: badgeBg,
+                          border: `1px solid ${badgeBorder || 'transparent'}`,
+                          borderRadius: '6px',
+                          padding: '3px 9px',
+                          color: badgeColor,
+                          fontSize: '11px',
+                          fontWeight: 700,
+                          alignSelf: 'flex-start',
+                        }}
+                      >
+                        <Shield size={12} strokeWidth={2.4} style={{ color: badgeColor }} />
+                        <span>{roleDisplay}</span>
+                      </div>
+                    );
+                  })()}
                 </div>
               </div>
 
@@ -695,15 +701,29 @@ export const ProfileView: React.FC = () => {
                   <span>{t('user_profile.system_role', 'SYSTEM ROLE')}</span>
                 </div>
 
-                <div
-                  style={{
-                    marginTop: '10px',
-                    fontSize: '15.5px',
-                    fontWeight: 700,
-                    color: '#0F172A',
-                  }}
-                >
-                  {roleDisplay}
+                <div style={{ marginTop: '10px' }}>
+                  {(() => {
+                    const [badgeBg, badgeColor, badgeBorder] = getRoleBadgeStyle(roleName || roleDisplay);
+                    return (
+                      <span
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '6px',
+                          fontSize: '13px',
+                          fontWeight: 700,
+                          padding: '4px 10px',
+                          background: badgeBg,
+                          color: badgeColor,
+                          border: `1px solid ${badgeBorder || 'transparent'}`,
+                          borderRadius: '6px',
+                        }}
+                      >
+                        <ShieldCheck size={14} style={{ color: badgeColor }} />
+                        <span>{roleDisplay}</span>
+                      </span>
+                    );
+                  })()}
                 </div>
               </div>
 
@@ -741,24 +761,36 @@ export const ProfileView: React.FC = () => {
                     display: 'flex',
                     alignItems: 'center',
                     gap: '8px',
-                    fontSize: '15px',
-                    fontWeight: 700,
-                    color: isAccountActive ? '#1F9D55' : '#DC2626',
                   }}
                 >
                   <span
                     style={{
-                      width: '8px',
-                      height: '8px',
-                      borderRadius: '50%',
-                      background: isAccountActive ? '#1F9D55' : '#DC2626',
-                      flexShrink: 0,
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                      fontSize: '13px',
+                      fontWeight: 700,
+                      padding: '4px 10px',
+                      background: isAccountActive ? '#ECFDF5' : '#FEF2F2',
+                      color: isAccountActive ? '#059669' : '#DC2626',
+                      border: `1px solid ${isAccountActive ? '#A7F3D0' : '#FECACA'}`,
+                      borderRadius: '6px',
                     }}
-                  />
-                  <span>
-                    {isAccountActive
-                      ? t('user_profile.status_active', isNl ? 'Actief' : 'Active')
-                      : t('user_profile.status_inactive', isNl ? 'Inactief' : 'Inactive')}
+                  >
+                    <span
+                      style={{
+                        width: '7px',
+                        height: '7px',
+                        borderRadius: '50%',
+                        background: isAccountActive ? '#059669' : '#DC2626',
+                        flexShrink: 0,
+                      }}
+                    />
+                    <span>
+                      {isAccountActive
+                        ? t('user_profile.status_active', isNl ? 'Actief' : 'Active')
+                        : t('user_profile.status_inactive', isNl ? 'Inactief' : 'Inactive')}
+                    </span>
                   </span>
                 </div>
               </div>

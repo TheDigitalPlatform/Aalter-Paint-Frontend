@@ -7,9 +7,22 @@ export interface AuthUser {
   id: string;
   name: string;
   email: string;
-  role: "admin" | "manager" | "viewer" | "user";
+  role: string;
+  role_id?: number;
   avatar?: string;
   status?: string;
+  modules?: Array<{ id?: number; key: string; name?: string }>;
+  settings?: {
+    module_key: string;
+    module_name: string;
+    has_access: boolean;
+    label: string;
+  };
+  actions?: {
+    view_as?: boolean;
+    edit?: boolean;
+    delete?: boolean;
+  };
 }
 
 export interface LoginCredentials {
@@ -69,21 +82,14 @@ export function getAuthHeaders(token?: string): Record<string, string> {
 }
 
 // ── User helpers ───────────────────────────────────────────
-export function mapRole(roleIdOrName: any): AuthUser["role"] {
-  if (typeof roleIdOrName === "string") {
-    const r = roleIdOrName.toLowerCase();
-    if (r === "admin" || r === "directie") return "admin";
-    if (r === "manager" || r === "beheerder" || r === "beoordelaar") return "manager";
-    return "viewer";
+export function mapRole(roleIdOrName: any): string {
+  if (typeof roleIdOrName === "string" && roleIdOrName.trim()) {
+    return roleIdOrName.trim();
   }
-  switch (Number(roleIdOrName)) {
-    case 1:
-      return "admin";
-    case 2:
-      return "manager";
-    default:
-      return "viewer";
+  if (roleIdOrName && typeof roleIdOrName === "object" && "name" in roleIdOrName) {
+    return String(roleIdOrName.name || "");
   }
+  return "";
 }
 
 export function getUser(): AuthUser | null {
@@ -102,7 +108,7 @@ export function getUser(): AuthUser | null {
       id: String(decoded.sub || decoded.id || decoded.user_id || ""),
       name: decoded.name || decoded.full_name || (decoded.email ? decoded.email.split("@")[0] : ""),
       email: decoded.email || decoded.sub || "",
-      role: mapRole(decoded.role || decoded.role_id),
+      role: mapRole(decoded.role || decoded.role_name || decoded.role_id),
       avatar: decoded.avatar,
       status: decoded.status || (decoded.is_active === false ? "Inactive" : "Active"),
     };

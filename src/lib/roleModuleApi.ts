@@ -43,22 +43,32 @@ export interface RoleModuleApiResponse {
 
 /**
  * Deterministic badge color styling for roles dynamically returned from backend
+ * Returns [backgroundColor, textColor, borderColor]
  */
-export function getRoleBadgeStyle(roleName: string): [string, string] {
+export function getRoleBadgeStyle(roleName: string): [string, string, string] {
   const norm = (roleName || '').toLowerCase().trim();
+  // Managing board / Executive
   if (norm.includes('board') || norm.includes('directie') || norm.includes('manage')) {
-    return ['#EBEBEB', '#242424'];
+    return ['#F1F5F9', '#1E293B', '#CBD5E1'];
   }
+  // Administrator
   if (norm.includes('admin') || norm.includes('beheerder')) {
-    return ['#FFF3B8', '#5C4A00'];
+    return ['#FEF3C7', '#92400E', '#FDE68A'];
   }
+  // Reviewer
   if (norm.includes('review') || norm.includes('beoordeel')) {
-    return ['#E7EEFC', '#1D4FBF'];
+    return ['#EFF6FF', '#1D4ED8', '#BFDBFE'];
   }
+  // Sales
   if (norm.includes('sale') || norm.includes('verkoop')) {
-    return ['#F5F5F5', '#4D4D4D'];
+    return ['#F8FAFC', '#475569', '#E2E8F0'];
   }
-  return ['#F3F4F6', '#374151'];
+  // Viewer / Guest
+  if (norm.includes('view') || norm.includes('kijk')) {
+    return ['#EFF6FF', '#2563EB', '#BFDBFE'];
+  }
+  // Default fallback
+  return ['#F1F5F9', '#334155', '#E2E8F0'];
 }
 
 function parseApiError(data: any, defaultMsg: string): string {
@@ -115,6 +125,8 @@ export async function fetchRoleModuleMatrix(forceRefresh = false): Promise<RoleM
   return promise;
 }
 
+import { broadcastPermissionsChanged } from './rbac';
+
 // ── PUT /api/role-modules ───────────────────────────────────────────────────
 // Updates role-module permissions dynamically on the backend
 export async function updateRoleModulePermissions(
@@ -147,5 +159,9 @@ export async function updateRoleModulePermissions(
   }
 
   const result = data.data !== undefined ? data.data : data;
+
+  // Broadcast permission update in real-time across tabs and components
+  broadcastPermissionsChanged();
+
   return result as RoleModuleMatrixData;
 }

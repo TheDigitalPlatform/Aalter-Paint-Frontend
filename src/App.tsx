@@ -23,21 +23,21 @@ const ProtectedRoute: React.FC<{ children?: React.ReactNode }> = ({ children }) 
 };
 
 const PublicRoute: React.FC<{ children?: React.ReactNode }> = ({ children }) => {
-  const { isAuthenticated, loading } = useAuth();
+  const { isAuthenticated, loading, firstAllowedModule } = useAuth();
 
   if (loading) {
     return null;
   }
 
   if (isAuthenticated) {
-    return <Navigate to="/overview" replace />;
+    return <Navigate to={`/${firstAllowedModule}`} replace />;
   }
 
   return children ? <>{children}</> : <Outlet />;
 };
 
 const RootRedirect: React.FC = () => {
-  const { isAuthenticated, loading } = useAuth();
+  const { isAuthenticated, loading, firstAllowedModule } = useAuth();
 
   if (loading) {
     return null;
@@ -47,13 +47,13 @@ const RootRedirect: React.FC = () => {
     return <Navigate to="/login" replace />;
   }
 
-  return <Navigate to="/overview" replace />;
+  return <Navigate to={`/${firstAllowedModule}`} replace />;
 };
 
 function AppRoutes() {
   return (
     <Routes>
-      {/* Root redirect */}
+      {/* Dynamic Root redirect */}
       <Route path="/" element={<RootRedirect />} />
 
       {/* Public Auth Routes */}
@@ -90,7 +90,7 @@ function AppRoutes() {
         }
       />
 
-      {/* Protected Dashboard Routes */}
+      {/* Protected Dashboard Routes (Route & UI access guarded dynamically) */}
       <Route element={<ProtectedRoute />}>
         <Route path="/overview" element={<HomePage initialModule="overview" />} />
         <Route path="/insights" element={<HomePage initialModule="insights" />} />
@@ -102,10 +102,10 @@ function AppRoutes() {
         <Route path="/audit" element={<HomePage initialModule="audit" />} />
         <Route path="/learning" element={<HomePage initialModule="learning" />} />
         <Route path="/profile" element={<HomePage initialModule="profile" />} />
-        <Route path="/home" element={<Navigate to="/overview" replace />} />
+        <Route path="/home" element={<RootRedirect />} />
       </Route>
 
-      {/* Wildcard fallback: Redirect unknown paths to / */}
+      {/* Wildcard fallback: Redirect unknown paths to dynamic root */}
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );

@@ -8,6 +8,19 @@ export interface RoleObject {
   updated_at?: string;
 }
 
+export interface UserActions {
+  view_as?: boolean;
+  edit?: boolean;
+  delete?: boolean;
+}
+
+export interface SettingsInfo {
+  module_key: string;
+  module_name: string;
+  has_access: boolean;
+  label: string;
+}
+
 export interface UserRow {
   id: number | string;
   name: string;
@@ -18,6 +31,9 @@ export interface UserRow {
   updated_at?: string;
   status?: string;
   is_active?: boolean;
+  actions?: UserActions;
+  modules?: Array<{ id?: number; key: string; name?: string }>;
+  settings?: SettingsInfo;
 }
 
 export interface CreateUserPayload {
@@ -92,7 +108,7 @@ export async function updateMyProfile(payload: ProfileUpdatePayload): Promise<Us
 }
 
 // GET /api/users
-export async function fetchUsers(skip = 0, limit = 10): Promise<FetchUsersResponse> {
+export async function fetchUsers(skip = 0, limit = 100): Promise<UserRow[]> {
   const res = await fetch(`${getApiBaseUrl()}/users?skip=${skip}&limit=${limit}`, {
     headers: getAuthHeaders(),
   });
@@ -103,7 +119,10 @@ export async function fetchUsers(skip = 0, limit = 10): Promise<FetchUsersRespon
   if (data.success === false) {
     throw new Error(data.message || data.detail || 'Failed to fetch users');
   }
-  return data.data !== undefined ? data.data : data;
+  const result = data.data !== undefined ? data.data : data;
+  if (Array.isArray(result)) return result;
+  if (Array.isArray(result?.items)) return result.items;
+  return [];
 }
 
 // GET /api/roles
