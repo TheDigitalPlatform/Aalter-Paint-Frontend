@@ -49,14 +49,123 @@ function getInitials(name: string): string {
   return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
 }
 
+// Declarative mapping to translate backend API / network exceptions into localized messages
+const API_ERROR_RULES: Array<{ pattern: RegExp; key: string }> = [
+  { pattern: /already exists|already in use|bestaat al/i, key: 'roles.error_user_exists' },
+  { pattern: /name is required|naam is verplicht/i, key: 'roles.error_name_required' },
+  { pattern: /email/i, key: 'roles.error_email_required' },
+  { pattern: /select.*role|selecteer.*rol/i, key: 'roles.error_role_required' },
+  { pattern: /role not found|rol niet gevonden/i, key: 'roles.error_role_not_found' },
+  { pattern: /password.*(required|verplicht)/i, key: 'roles.error_password_required' },
+  { pattern: /6 characters|6 tekens/i, key: 'roles.error_password_min' },
+  { pattern: /own account|eigen account/i, key: 'roles.error_cannot_delete_self' },
+  { pattern: /cannot be deleted|niet worden verwijderd/i, key: 'roles.error_cannot_delete_user' },
+  { pattern: /user not found|gebruiker niet gevonden/i, key: 'roles.error_user_not_found' },
+  { pattern: /permission|forbidden|toestemming/i, key: 'roles.error_not_permitted' },
+  { pattern: /fetch users|ophalen gebruikers/i, key: 'roles.error_load_failed' },
+  { pattern: /delete/i, key: 'roles.error_delete_failed' },
+  { pattern: /update|matrix|bijwerken/i, key: 'roles.error_matrix_failed' },
+  { pattern: /save|opslaan/i, key: 'roles.error_save_failed' },
+];
+
+function resolveApiErrorMessage(
+  err: any,
+  t: (k: string) => string,
+  fallbackKey = 'roles.error_save_failed'
+): string {
+  const msg = typeof err === 'string' ? err : err?.message || '';
+  const match = API_ERROR_RULES.find((r) => r.pattern.test(msg));
+  return match ? t(match.key) : (msg.trim() || t(fallbackKey));
+}
+
+// Localize module names dynamically based on active language dictionary
+export function getLocalizedModuleName(
+  mod: { key?: string; name?: string } | string | undefined,
+  t: (k: string, fb?: string) => string
+): string {
+  if (!mod) return '';
+  const rawKey = typeof mod === 'string' ? mod : mod.key || mod.name || '';
+  const norm = rawKey.toLowerCase().trim().replace(/[\s-]+/g, '_');
+
+  if (norm.includes('overview') || norm.includes('overzicht')) return t('modules.overview', 'Overzicht');
+  if (norm.includes('insight') || norm.includes('inzicht')) return t('modules.insights', 'Inzichten');
+  if (norm === 'orders' || norm.includes('order')) return t('modules.orders', 'Orders');
+  if (norm.includes('validat')) return t('modules.validation', 'Validatie');
+  if (
+    norm.includes('exception') ||
+    norm.includes('uitzondering') ||
+    norm.includes('bc_sync') ||
+    norm.includes('sync')
+  ) {
+    return t('modules.exceptions_bc_sync', 'Uitzonderingen en BC-sync');
+  }
+  if (norm.includes('institution') || norm.includes('instelling') || norm.includes('setting')) {
+    return t('modules.institutions', 'Instellingen');
+  }
+  if (norm.includes('role') || norm.includes('toegang') || norm.includes('access')) {
+    return t('modules.roles_and_access', 'Rollen en toegang');
+  }
+  if (norm.includes('audit')) return t('modules.audit_trail', 'Audittrail');
+  if (norm.includes('learn')) return t('modules.learning_loop', 'Learning loop');
+
+  const fallback = typeof mod === 'string' ? mod : mod.name || mod.key || '';
+  return t(`modules.${norm}`, fallback);
+}
+
+// Localize role names based on active language dictionary
+export function getLocalizedRoleName(
+  roleName: string | undefined,
+  t: (k: string, fb?: string) => string
+): string {
+  if (!roleName) return '';
+  const norm = roleName.toLowerCase().trim();
+  if (norm.includes('board') || norm.includes('directie') || norm.includes('manage')) {
+    return t('roles_data.managing_board', roleName);
+  }
+  if (norm.includes('admin') || norm.includes('beheer')) {
+    return t('roles_data.administrator', roleName);
+  }
+  if (norm.includes('review') || norm.includes('beoordeel')) {
+    return t('roles_data.reviewer', roleName);
+  }
+  if (norm.includes('sale') || norm.includes('verkoop')) {
+    return t('roles_data.sale', roleName);
+  }
+  return roleName;
+}
+
+// Localize role descriptions based on active language dictionary
+export function getLocalizedRoleDesc(
+  desc: string | undefined,
+  t: (k: string, fb?: string) => string
+): string {
+  if (!desc) return '';
+  const norm = desc.toLowerCase().trim();
+  if (norm.includes('all module') || norm.includes('alle module')) {
+    return t('roles_data.all_modules', desc);
+  }
+  if (norm.includes('configuration') || norm.includes('configuratie')) {
+    return t('roles_data.configuration_and_users', desc);
+  }
+  if (norm.includes('order admin') || norm.includes('orderadministratie')) {
+    return t('roles_data.order_administration', desc);
+  }
+  if (norm.includes('read only') || norm.includes('alleen-lezen') || norm.includes('alleen')) {
+    return t('roles_data.read_only', desc);
+  }
+  return desc;
+}
+
 export const RolesView: React.FC<RolesViewProps> = ({
-  language: propLang,
   currentUserId: propUserId,
 }) => {
-  const { language: ctxLang } = useTranslation();
+  const { t } = useTranslation();
   const { user: currentAuthUser, canPerformAction } = useAuth();
-  const lang = propLang || ctxLang || 'NL';
-  const isNl = lang === 'NL';
+
+  const formatApiError = useCallback(
+    (err: any, fallbackKey = 'roles.error_save_failed') => resolveApiErrorMessage(err, t, fallbackKey),
+    [t]
+  );
 
   // Live Users state from GET /api/users
   const [users, setUsers] = useState<UserRow[]>([]);
@@ -87,7 +196,7 @@ export const RolesView: React.FC<RolesViewProps> = ({
         id: u.id,
         name: u.name,
         email: u.email,
-        role: u.role?.name || (typeof u.role === 'string' ? u.role : '') || (rolesList.find(r => r.id === u.role_id)?.name || 'Geen rol'),
+        role: u.role?.name || (typeof u.role === 'string' ? u.role : '') || (rolesList.find(r => r.id === u.role_id)?.name || t('roles.no_role')),
         role_id: u.role_id ?? u.role?.id,
         created_at: u.created_at,
         updated_at: u.updated_at,
@@ -95,11 +204,11 @@ export const RolesView: React.FC<RolesViewProps> = ({
       }));
       setUsers(mapped);
       if (showFeedback) {
-        toast.success(isNl ? 'Gebruikers succesvol geladen' : 'Users loaded successfully');
+        toast.success(t('roles.success_users_loaded'));
       }
     } catch (err: any) {
       console.error('GET /api/users error:', err);
-      const errMsg = err?.message || (isNl ? 'Fout bij ophalen gebruikers' : 'Failed to fetch users');
+      const errMsg = formatApiError(err, 'roles.error_load_failed');
       setUsersError(errMsg);
       if (showFeedback) {
         toast.error(errMsg);
@@ -107,7 +216,7 @@ export const RolesView: React.FC<RolesViewProps> = ({
     } finally {
       setIsUsersLoading(false);
     }
-  }, [isNl, rolesList]);
+  }, [t, formatApiError, rolesList]);
 
   // Load roles from GET /api/roles
   const loadRoles = useCallback(async () => {
@@ -133,12 +242,12 @@ export const RolesView: React.FC<RolesViewProps> = ({
       if (data && Array.isArray(data.modules) && Array.isArray(data.roles)) {
         setMatrixData(data);
         if (showFeedback) {
-          toast.success(isNl ? 'Rechtenmatrix succesvol gesynchroniseerd met server' : 'Permissions matrix synchronized with server');
+          toast.success(t('roles.success_matrix_synced'));
         }
       }
     } catch (err: any) {
       console.warn('GET /api/role-modules error:', err);
-      const errMsg = err?.message || (isNl ? 'Fout bij ophalen rechten' : 'Failed to fetch permissions');
+      const errMsg = formatApiError(err, 'roles.error_matrix_failed');
       setMatrixError(errMsg);
       if (showFeedback) {
         toast.error(errMsg);
@@ -146,7 +255,7 @@ export const RolesView: React.FC<RolesViewProps> = ({
     } finally {
       setIsMatrixLoading(false);
     }
-  }, [isNl]);
+  }, [t, formatApiError]);
 
   useEffect(() => {
     if (hasFetchedRef.current) return;
@@ -239,18 +348,14 @@ export const RolesView: React.FC<RolesViewProps> = ({
       if (updated && Array.isArray(updated.modules) && Array.isArray(updated.roles)) {
         setMatrixData(updated);
       }
-      toast.success(
-        isNl ? 'Recht succesvol bijgewerkt' : 'Permission updated successfully'
-      );
+      toast.success(t('roles.success_permission_updated'));
     } catch (err: any) {
       console.error('Failed to update permission via PUT /api/role-modules:', err);
       try {
         const refreshed = await fetchRoleModuleMatrix(true);
         setMatrixData(refreshed);
       } catch {}
-      toast.error(
-        err?.message || (isNl ? 'Fout bij bijwerken recht' : 'Failed to update permission')
-      );
+      toast.error(formatApiError(err, 'roles.error_matrix_failed'));
     } finally {
       setSavingCell(null);
     }
@@ -278,24 +383,24 @@ export const RolesView: React.FC<RolesViewProps> = ({
   // Form submission: POST /api/users or PUT /api/users/{id}
   const handleSaveUser = async () => {
     if (!dName.trim()) {
-      setDErr(isNl ? 'Naam is verplicht' : 'Name is required');
+      setDErr(t('roles.error_name_required'));
       return;
     }
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!dEmail.trim() || !emailRegex.test(dEmail.trim())) {
-      setDErr(isNl ? 'Geldig e-mailadres is verplicht' : 'Valid email address is required');
+      setDErr(t('roles.error_email_required'));
       return;
     }
     if (!dRoleId || dRoleId <= 0) {
-      setDErr(isNl ? 'Selecteer een geldige rol' : 'Please select a valid role');
+      setDErr(t('roles.error_role_required'));
       return;
     }
     if (dialog?.kind === 'add' && !dPassword.trim()) {
-      setDErr(isNl ? 'Wachtwoord is verplicht' : 'Password is required');
+      setDErr(t('roles.error_password_required'));
       return;
     }
     if (dPassword.trim() && dPassword.trim().length < 6) {
-      setDErr(isNl ? 'Wachtwoord moet minimaal 6 tekens bevatten' : 'Password must be at least 6 characters');
+      setDErr(t('roles.error_password_min'));
       return;
     }
 
@@ -312,11 +417,7 @@ export const RolesView: React.FC<RolesViewProps> = ({
         };
 
         const created = await createUser(payload);
-        toast.success(
-          isNl
-            ? `Gebruiker ${created.name} succesvol aangemaakt`
-            : `User ${created.name} created successfully`
-        );
+        toast.success(t('roles.success_user_created', { name: created.name }));
         closeDialog();
         await loadUsers(false);
       } else if (dialog?.kind === 'edit') {
@@ -329,17 +430,13 @@ export const RolesView: React.FC<RolesViewProps> = ({
 
         const updated = await updateUser(dialog.user.id, payload);
         broadcastPermissionsChanged();
-        toast.success(
-          isNl
-            ? `Gegevens van ${updated.name} succesvol opgeslagen`
-            : `Details for ${updated.name} saved successfully`
-        );
+        toast.success(t('roles.success_user_updated', { name: updated.name }));
         closeDialog();
         await loadUsers(false);
       }
     } catch (err: any) {
       console.error('Save user error:', err);
-      const errMsg = err?.message || (isNl ? 'Fout bij opslaan gebruiker' : 'Failed to save user');
+      const errMsg = formatApiError(err, 'roles.error_save_failed');
       setDErr(errMsg);
       toast.error(errMsg);
     } finally {
@@ -355,16 +452,12 @@ export const RolesView: React.FC<RolesViewProps> = ({
     try {
       await deleteUser(target.id);
       broadcastPermissionsChanged();
-      toast.success(
-        isNl
-          ? `Gebruiker ${target.name} succesvol verwijderd`
-          : `User ${target.name} deleted successfully`
-      );
+      toast.success(t('roles.success_user_deleted', { name: target.name }));
       closeDialog();
       await loadUsers(false);
     } catch (err: any) {
       console.error('Delete user error:', err);
-      const errMsg = err?.message || (isNl ? 'Fout bij verwijderen gebruiker' : 'Failed to delete user');
+      const errMsg = formatApiError(err, 'roles.error_delete_failed');
       toast.error(errMsg);
     } finally {
       setIsSubmitting(false);
@@ -404,12 +497,10 @@ export const RolesView: React.FC<RolesViewProps> = ({
               color: '#1A1A1A',
             }}
           >
-            {isNl ? 'Rollen en toegang' : 'Roles and access'}
+            {t('roles.title')}
           </h1>
           <p style={{ margin: 0, color: '#4D4D4D', lineHeight: 1.5, maxWidth: '780px' }}>
-            {isNl
-              ? 'Een rol bepaalt welke modules iemand ziet. Wijzig een rol en de modules passen meteen aan; met Bekijk als zie je het menu van die gebruiker.'
-              : "A role determines which modules someone sees. Changing a role updates modules immediately; with 'View as' you see that user's menu."}
+            {t('roles.subtitle')}
           </p>
         </div>
 
@@ -430,7 +521,7 @@ export const RolesView: React.FC<RolesViewProps> = ({
             borderRadius: '4px',
           }}
         >
-          {isNl ? 'GEBRUIKER TOEVOEGEN' : 'ADD USER'}
+          {t('roles.add_user').toUpperCase()}
         </button>
       </div>
 
@@ -459,11 +550,11 @@ export const RolesView: React.FC<RolesViewProps> = ({
               color: '#6B6B6B',
             }}
           >
-            <span>{isNl ? 'Gebruiker' : 'User'}</span>
-            <span>{isNl ? 'Rol' : 'Role'}</span>
-            <span>Modules</span>
-            <span>{isNl ? 'Instellingen' : 'Settings'}</span>
-            <span>{isNl ? 'Acties' : 'Actions'}</span>
+            <span>{t('roles.user_col')}</span>
+            <span>{t('roles.role_col')}</span>
+            <span>{t('roles.modules_col')}</span>
+            <span>{t('roles.settings_col')}</span>
+            <span>{t('roles.actions_col')}</span>
           </div>
 
           {/* Loading State */}
@@ -471,7 +562,7 @@ export const RolesView: React.FC<RolesViewProps> = ({
             <div style={{ padding: '36px 20px', textAlign: 'center', color: '#6B7280', fontSize: '14px' }}>
               <div style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
                 <Loader2 size={16} className="animate-spin" />
-                <span>{isNl ? 'Gebruikers laden...' : 'Loading users...'}</span>
+                <span>{t('roles.loading_users')}</span>
               </div>
             </div>
           )}
@@ -494,7 +585,7 @@ export const RolesView: React.FC<RolesViewProps> = ({
                   cursor: 'pointer',
                 }}
               >
-                {isNl ? 'Opnieuw proberen' : 'Retry'}
+                {t('roles.retry')}
               </button>
             </div>
           )}
@@ -502,14 +593,14 @@ export const RolesView: React.FC<RolesViewProps> = ({
           {/* Empty State */}
           {!isUsersLoading && !usersError && users.length === 0 && (
             <div style={{ padding: '48px 20px', textAlign: 'center', color: '#6B7280', fontSize: '14px' }}>
-              <p style={{ margin: '0 0 12px 0' }}>{isNl ? 'Geen gebruikers gevonden.' : 'No users found.'}</p>
+              <p style={{ margin: '0 0 12px 0' }}>{t('roles.no_users_found')}</p>
               <button
                 type="button"
                 className="ap-add-user-btn"
                 onClick={openAdd}
                 style={{ minHeight: '36px', padding: '0 16px', fontSize: '12px' }}
               >
-                {isNl ? 'GEBRUIKER TOEVOEGEN' : 'ADD USER'}
+                {t('roles.add_user').toUpperCase()}
               </button>
             </div>
           )}
@@ -521,7 +612,7 @@ export const RolesView: React.FC<RolesViewProps> = ({
               String(u.id) === String(currentAuthUser?.id) ||
               String(u.id) === String(propUserId);
             const badgeStyle = getRoleBadgeStyle(u.role);
-            const roleLabel = u.role || (isNl ? 'Geen rol' : 'No role');
+            const roleLabel = getLocalizedRoleName(u.role, t) || t('roles.no_role');
 
             // Locate role permissions dynamically in live matrixData
             const matchedRole = matrixData.roles.find(
@@ -625,12 +716,12 @@ export const RolesView: React.FC<RolesViewProps> = ({
                           lineHeight: 1.3,
                         }}
                       >
-                        {mod.name}
+                        {getLocalizedModuleName(mod, t)}
                       </span>
                     ))
                   ) : (
                     <span style={{ fontSize: '12px', color: '#94A3B8', fontStyle: 'italic' }}>
-                      {isNl ? 'Geen modules' : 'No modules'}
+                      {t('roles.no_modules')}
                     </span>
                   )}
                 </span>
@@ -651,11 +742,11 @@ export const RolesView: React.FC<RolesViewProps> = ({
                         whiteSpace: 'nowrap',
                       }}
                     >
-                      {isNl ? 'Instellingen' : 'Settings'}
+                      {t('roles.settings_col')}
                     </span>
                   ) : (
                     <span style={{ fontSize: '13px', color: '#64748B', whiteSpace: 'nowrap' }}>
-                      {isNl ? 'Geen toegang' : 'No access'}
+                      {t('roles.no_access')}
                     </span>
                   )}
                 </span>
@@ -667,7 +758,7 @@ export const RolesView: React.FC<RolesViewProps> = ({
                     type="button"
                     className="bg"
                     onClick={() => openEdit(u)}
-                    title={isNl ? 'Gebruiker bewerken' : 'Edit user'}
+                    title={t('roles.edit_user')}
                     style={{
                       display: 'inline-flex',
                       alignItems: 'center',
@@ -700,17 +791,17 @@ export const RolesView: React.FC<RolesViewProps> = ({
                     }}
                   >
                     <Pencil size={12} style={{ strokeWidth: 2.2, color: 'currentColor' }} />
-                    <span>{isNl ? 'Bewerken' : 'Edit'}</span>
+                    <span>{t('roles.edit')}</span>
                   </button>
 
                   {(() => {
                     const canDelete = canPerformAction('delete', u);
                     const isDeleteDisabled = !canDelete;
                     const deleteTitle = isMe
-                      ? (isNl ? 'Je kunt je eigen account niet verwijderen' : 'You cannot delete your own account')
+                      ? t('roles.error_cannot_delete_self')
                       : !canDelete
-                      ? (isNl ? 'Deze gebruiker kan niet worden verwijderd (beveiligde rol)' : 'This user cannot be deleted (protected role)')
-                      : (isNl ? 'Gebruiker verwijderen' : 'Delete user');
+                      ? t('roles.error_cannot_delete_user')
+                      : t('roles.delete_user');
 
                     return (
                       <button
@@ -756,7 +847,7 @@ export const RolesView: React.FC<RolesViewProps> = ({
                         }}
                       >
                         <Trash2 size={12} style={{ strokeWidth: 2.2, color: 'currentColor' }} />
-                        <span>{isNl ? 'Verwijderen' : 'Delete'}</span>
+                        <span>{t('roles.delete')}</span>
                       </button>
                     );
                   })()}
@@ -781,7 +872,7 @@ export const RolesView: React.FC<RolesViewProps> = ({
                 color: '#111827',
               }}
             >
-              {isNl ? 'Rol naar module' : 'Role to module'}
+              {t('roles.role_matrix_title')}
             </h2>
 
             {/* Loading Indicator */}
@@ -811,7 +902,7 @@ export const RolesView: React.FC<RolesViewProps> = ({
                     display: 'inline-block',
                   }}
                 />
-                {isNl ? 'Laden...' : 'Loading...'}
+                {t('roles.loading_matrix')}
               </span>
             )}
 
@@ -867,7 +958,7 @@ export const RolesView: React.FC<RolesViewProps> = ({
               <path d="M12 20h9" />
               <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
             </svg>
-            <span>{isNl ? 'RECHTEN BEWERKEN' : 'EDIT PERMISSIONS'}</span>
+            <span>{t('roles.edit_permissions').toUpperCase()}</span>
           </button>
         </div>
 
@@ -895,7 +986,7 @@ export const RolesView: React.FC<RolesViewProps> = ({
               }}
             >
               <span style={{ fontWeight: 700, fontSize: '13.5px', color: '#111827' }}>
-                {isNl ? 'Rol' : 'Role'}
+                {t('roles.role_col')}
               </span>
               {matrixData.modules.map((m) => (
                 <span
@@ -915,15 +1006,15 @@ export const RolesView: React.FC<RolesViewProps> = ({
                     margin: '0 auto',
                   }}
                 >
-                  {m.name}
+                  {getLocalizedModuleName(m, t)}
                 </span>
               ))}
             </div>
 
             {/* Dynamic Table Rows */}
             {matrixData.roles.map((r, idx) => {
-              const roleLabel = r.name;
-              const roleDesc = r.description;
+              const roleLabel = getLocalizedRoleName(r.name, t);
+              const roleDesc = getLocalizedRoleDesc(r.description, t);
               const isLast = idx === matrixData.roles.length - 1;
 
               return (
@@ -1009,7 +1100,7 @@ export const RolesView: React.FC<RolesViewProps> = ({
                 {matrixError ? (
                   <span style={{ color: '#DC2626' }}>{matrixError}</span>
                 ) : (
-                  <span>{isNl ? 'Geen rollen en modules geladen' : 'No roles and modules loaded'}</span>
+                  <span>{t('roles.no_roles_loaded')}</span>
                 )}
               </div>
             )}
@@ -1041,7 +1132,7 @@ export const RolesView: React.FC<RolesViewProps> = ({
               type="button"
               className="ap-modal-close-btn"
               onClick={closeDialog}
-              aria-label={isNl ? 'Sluiten' : 'Close'}
+              aria-label={t('roles.close')}
               style={{ top: '12px', right: '12px', width: '26px', height: '26px' }}
             >
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
@@ -1064,16 +1155,10 @@ export const RolesView: React.FC<RolesViewProps> = ({
               }}
             >
               {dialog.kind === 'add'
-                ? isNl
-                  ? 'Gebruiker toevoegen'
-                  : 'Add user'
+                ? t('roles.add_user')
                 : dialog.kind === 'edit'
-                ? isNl
-                  ? 'Gebruiker bewerken'
-                  : 'Edit user'
-                : isNl
-                ? 'Gebruiker verwijderen'
-                : 'Delete user'}
+                ? t('roles.edit_user')
+                : t('roles.delete_user')}
             </h2>
 
             {/* Form for Add / Edit */}
@@ -1092,7 +1177,7 @@ export const RolesView: React.FC<RolesViewProps> = ({
                   }}
                 >
                   <span>
-                    {isNl ? 'Naam' : 'Name'} <span style={{ color: '#E20714' }}>*</span>
+                    {t('roles.name_label')} <span style={{ color: '#E20714' }}>*</span>
                   </span>
                   <input
                     type="text"
@@ -1101,7 +1186,7 @@ export const RolesView: React.FC<RolesViewProps> = ({
                     onKeyDown={(e) => {
                       if (e.key === 'Enter') handleSaveUser();
                     }}
-                    placeholder={isNl ? 'bv. Lien Desmet' : 'e.g. Lien Desmet'}
+                    placeholder={t('roles.placeholder_name')}
                     className="ap-modal-input"
                     style={{ height: '34px', fontSize: '13px', padding: '0 10px', borderRadius: '6px' }}
                     autoFocus
@@ -1121,7 +1206,7 @@ export const RolesView: React.FC<RolesViewProps> = ({
                   }}
                 >
                   <span>
-                    {isNl ? 'E-mailadres' : 'Email address'} <span style={{ color: '#E20714' }}>*</span>
+                    {t('roles.email_label')} <span style={{ color: '#E20714' }}>*</span>
                   </span>
                   <input
                     type="email"
@@ -1130,7 +1215,7 @@ export const RolesView: React.FC<RolesViewProps> = ({
                     onKeyDown={(e) => {
                       if (e.key === 'Enter') handleSaveUser();
                     }}
-                    placeholder={isNl ? 'voornaam.naam@aalterpaint.be' : 'firstname.lastname@aalterpaint.be'}
+                    placeholder={t('roles.placeholder_email')}
                     className="ap-modal-input"
                     style={{ height: '34px', fontSize: '13px', padding: '0 10px', borderRadius: '6px' }}
                   />
@@ -1149,7 +1234,7 @@ export const RolesView: React.FC<RolesViewProps> = ({
                   }}
                 >
                   <span>
-                    {isNl ? 'Rol' : 'Role'} <span style={{ color: '#E20714' }}>*</span>
+                    {t('roles.role_label')} <span style={{ color: '#E20714' }}>*</span>
                   </span>
                   <select
                     value={dRoleId}
@@ -1159,7 +1244,7 @@ export const RolesView: React.FC<RolesViewProps> = ({
                   >
                     {rolesList.map((r) => (
                       <option key={r.id} value={r.id}>
-                        {r.name}
+                        {getLocalizedRoleName(r.name, t)}
                       </option>
                     ))}
                   </select>
@@ -1178,7 +1263,7 @@ export const RolesView: React.FC<RolesViewProps> = ({
                   }}
                 >
                   <span style={{ fontSize: '10px', fontWeight: 700, color: '#4B5563', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-                    {isNl ? 'MODULES VOOR DEZE ROL' : 'MODULES FOR THIS ROLE'}
+                    {t('roles.modules_for_role')}
                   </span>
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
                     {dialogMods.length > 0 ? (
@@ -1188,12 +1273,12 @@ export const RolesView: React.FC<RolesViewProps> = ({
                           className="ap-modal-badge"
                           style={{ fontSize: '10.5px', padding: '2px 6px', borderRadius: '4px' }}
                         >
-                          {dm.name}
+                          {getLocalizedModuleName(dm, t)}
                         </span>
                       ))
                     ) : (
                       <span style={{ fontSize: '11px', color: '#6B7280', fontStyle: 'italic' }}>
-                        {isNl ? 'Geen modules toegewezen' : 'No modules assigned'}
+                        {t('roles.no_modules_assigned')}
                       </span>
                     )}
                   </div>
@@ -1214,12 +1299,12 @@ export const RolesView: React.FC<RolesViewProps> = ({
                     }}
                   >
                     <span>
-                      {isNl ? 'Wachtwoord' : 'Password'}{' '}
+                      {t('roles.password_label')}{' '}
                       {dialog.kind === 'add' ? (
                         <span style={{ color: '#E20714' }}>*</span>
                       ) : (
                         <span style={{ fontSize: '10.5px', fontWeight: 500, color: '#9CA3AF', textTransform: 'none' }}>
-                          ({isNl ? 'laat leeg om te behouden' : 'leave blank to keep current'})
+                          ({t('roles.password_keep_hint')})
                         </span>
                       )}
                     </span>
@@ -1235,8 +1320,8 @@ export const RolesView: React.FC<RolesViewProps> = ({
                       }}
                       placeholder={
                         dialog.kind === 'add'
-                          ? (isNl ? 'Voer veilig wachtwoord in...' : 'Enter secure password...')
-                          : (isNl ? 'Nieuw wachtwoord invoeren (optioneel)...' : 'Enter secure password...')
+                          ? t('roles.placeholder_password_add')
+                          : t('roles.placeholder_password_edit')
                       }
                       className="ap-password-pill-input"
                     />
@@ -1244,8 +1329,8 @@ export const RolesView: React.FC<RolesViewProps> = ({
                       type="button"
                       className="ap-password-pill-btn"
                       onClick={() => setShowPasswordText(!showPasswordText)}
-                      aria-label={showPasswordText ? 'Hide password' : 'Show password'}
-                      title={showPasswordText ? (isNl ? 'Verberg wachtwoord' : 'Hide password') : (isNl ? 'Toon wachtwoord' : 'Show password')}
+                      aria-label={showPasswordText ? t('roles.hide_password') : t('roles.show_password')}
+                      title={showPasswordText ? t('roles.hide_password') : t('roles.show_password')}
                     >
                       {showPasswordText ? <EyeOff size={17} strokeWidth={1.75} /> : <Eye size={17} strokeWidth={1.75} />}
                     </button>
@@ -1271,9 +1356,7 @@ export const RolesView: React.FC<RolesViewProps> = ({
             ) : (
               /* Delete confirmation */
               <div style={{ padding: '4px 0 8px 0', fontSize: '13px', color: '#1F2937', lineHeight: 1.45 }}>
-                {isNl
-                  ? `Ben je zeker dat je ${dialog.user.name} wil verwijderen?`
-                  : `Are you sure you want to delete ${dialog.user.name}?`}
+                {t('roles.delete_confirm', { name: dialog.user.name })}
               </div>
             )}
 
@@ -1300,7 +1383,7 @@ export const RolesView: React.FC<RolesViewProps> = ({
                   borderRadius: '5px',
                 }}
               >
-                {isNl ? 'ANNULEREN' : 'CANCEL'}
+                {t('roles.cancel').toUpperCase()}
               </button>
               <button
                 type="button"
@@ -1324,10 +1407,10 @@ export const RolesView: React.FC<RolesViewProps> = ({
                 {isSubmitting && <Loader2 size={12} className="animate-spin" />}
                 <span>
                   {isSubmitting
-                    ? (isNl ? 'BEZIG...' : 'SAVING...')
-                    : (dialog.kind === 'del'
-                        ? (isNl ? 'VERWIJDEREN' : 'DELETE')
-                        : (isNl ? 'OPSLAAN' : 'SAVE'))}
+                    ? t('roles.saving').toUpperCase()
+                    : dialog.kind === 'del'
+                    ? t('roles.delete').toUpperCase()
+                    : t('roles.save').toUpperCase()}
                 </span>
               </button>
             </div>
@@ -1361,7 +1444,7 @@ export const RolesView: React.FC<RolesViewProps> = ({
               type="button"
               className="ap-modal-close-btn"
               onClick={() => !savingCell && setIsEditModalOpen(false)}
-              aria-label={isNl ? 'Sluiten' : 'Close'}
+              aria-label={t('roles.close')}
             >
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
                 <line x1="18" y1="6" x2="6" y2="18" />
@@ -1381,12 +1464,10 @@ export const RolesView: React.FC<RolesViewProps> = ({
                   letterSpacing: '-0.01em',
                 }}
               >
-                {isNl ? 'Rechten matrix bewerken' : 'Edit permissions matrix'}
+                {t('roles.edit_matrix_title')}
               </h2>
               <p style={{ margin: 0, fontSize: '13px', color: '#6B7280' }}>
-                {isNl
-                  ? 'Schakel modules per rol in of uit. Wijzigingen worden direct automatisch opgeslagen.'
-                  : 'Toggle modules on or off per role. Changes are automatically saved in real time.'}
+                {t('roles.edit_matrix_subtitle')}
               </p>
             </div>
 
@@ -1414,7 +1495,7 @@ export const RolesView: React.FC<RolesViewProps> = ({
                   }}
                 >
                   <span style={{ fontWeight: 700, fontSize: '13px', color: '#111827' }}>
-                    {isNl ? 'Rol' : 'Role'}
+                    {t('roles.role_col')}
                   </span>
                   {matrixData.modules.map((m) => (
                     <span
@@ -1434,7 +1515,7 @@ export const RolesView: React.FC<RolesViewProps> = ({
                         margin: '0 auto',
                       }}
                     >
-                      {m.name}
+                      {getLocalizedModuleName(m, t)}
                     </span>
                   ))}
                 </div>
@@ -1460,10 +1541,10 @@ export const RolesView: React.FC<RolesViewProps> = ({
                       {/* Role Details */}
                       <span style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
                         <span style={{ fontWeight: 700, fontSize: '14px', color: '#111827' }}>
-                          {r.name}
+                          {getLocalizedRoleName(r.name, t)}
                         </span>
                         <span style={{ fontSize: '12px', color: '#6B7280' }}>
-                          {r.description}
+                          {getLocalizedRoleDesc(r.description, t)}
                         </span>
                       </span>
 
@@ -1490,7 +1571,7 @@ export const RolesView: React.FC<RolesViewProps> = ({
                               aria-checked={isOn}
                               disabled={isCellSaving}
                               onClick={() => handleTogglePermission(r.id, m.id, !isOn)}
-                              title={`${r.name} - ${m.name}: ${isOn ? (isNl ? 'Ingeschakeld' : 'Enabled') : (isNl ? 'Uitgeschakeld' : 'Disabled')}`}
+                              title={`${getLocalizedRoleName(r.name, t)} - ${getLocalizedModuleName(m, t)}: ${isOn ? t('roles.enabled') : t('roles.disabled')}`}
                               style={{
                                 position: 'relative',
                                 display: 'inline-flex',

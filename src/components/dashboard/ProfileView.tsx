@@ -131,10 +131,12 @@ export const ProfileView: React.FC = () => {
         t('user_profile.update_success', isNl ? 'Profiel succesvol bijgewerkt' : 'Profile updated successfully')
       );
     } catch (err: any) {
-      toast.error(
-        err?.message ||
-          t('user_profile.update_error', isNl ? 'Bijwerken van profiel mislukt' : 'Failed to update profile')
-      );
+      const raw = (err?.message || '').toLowerCase();
+      let msg = t('user_profile.update_error', isNl ? 'Bijwerken van profiel mislukt' : 'Failed to update profile');
+      if (raw.includes('already exists') || raw.includes('already in use') || raw.includes('bestaat al')) {
+        msg = t('roles.error_user_exists');
+      }
+      toast.error(msg);
     } finally {
       setSaving(false);
     }
