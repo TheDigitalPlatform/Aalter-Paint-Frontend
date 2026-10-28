@@ -125,6 +125,16 @@ export function isAuthenticated(): boolean {
 
 export function logout(): void {
   removeToken();
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new CustomEvent("auth_unauthorized"));
+  }
+}
+
+export function handleUnauthorizedSession(): void {
+  removeToken();
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new CustomEvent("auth_unauthorized"));
+  }
 }
 
 function parseErrorMessage(result: any, defaultMsg: string): string {

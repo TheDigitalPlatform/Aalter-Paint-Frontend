@@ -1,9 +1,11 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { createPortal } from 'react-dom';
 import { Pencil, Trash2, Loader2, Lock, Eye, EyeOff } from 'lucide-react';
 import { toast } from 'sonner';
 import { useTranslation } from '../../context/LanguageContext';
 import { useAuth } from '../../context/AuthContext';
+import { getUser } from '../../lib/auth';
 import type { Language } from '../../locales/loadLocale';
 import {
   fetchRoleModuleMatrix,
@@ -160,7 +162,8 @@ export const RolesView: React.FC<RolesViewProps> = ({
   currentUserId: propUserId,
 }) => {
   const { t } = useTranslation();
-  const { user: currentAuthUser, canPerformAction } = useAuth();
+  const { user: currentAuthUser, canPerformAction, logout } = useAuth();
+  const navigate = useNavigate();
 
   const formatApiError = useCallback(
     (err: any, fallbackKey = 'roles.error_save_failed') => resolveApiErrorMessage(err, t, fallbackKey),
@@ -395,13 +398,15 @@ export const RolesView: React.FC<RolesViewProps> = ({
       setDErr(t('roles.error_role_required'));
       return;
     }
-    if (dialog?.kind === 'add' && !dPassword.trim()) {
-      setDErr(t('roles.error_password_required'));
-      return;
-    }
-    if (dPassword.trim() && dPassword.trim().length < 6) {
-      setDErr(t('roles.error_password_min'));
-      return;
+    if (dialog?.kind === 'add') {
+      if (!dPassword.trim()) {
+        setDErr(t('roles.error_password_required'));
+        return;
+      }
+      if (dPassword.trim().length < 6) {
+        setDErr(t('roles.error_password_min'));
+        return;
+      }
     }
 
     setIsSubmitting(true);
@@ -421,15 +426,42 @@ export const RolesView: React.FC<RolesViewProps> = ({
         closeDialog();
         await loadUsers(false);
       } else if (dialog?.kind === 'edit') {
+        const emailChanged = dEmail.trim().toLowerCase() !== dialog.user.email.toLowerCase();
+        const currentEmail = (currentAuthUser?.email || '').trim().toLowerCase();
+        const dialogEmail = (dialog.user.email || '').trim().toLowerCase();
+        const tokenEmail = (getUser()?.email || '').trim().toLowerCase();
+        const currentId = String(currentAuthUser?.id || '').trim();
+        const propId = String(propUserId || '').trim();
+        const dialogId = String(dialog.user.id || '').trim();
+
+        const isSelf =
+          (currentEmail && dialogEmail && currentEmail === dialogEmail) ||
+          (tokenEmail && dialogEmail && tokenEmail === dialogEmail) ||
+          (currentId && dialogId && currentId === dialogId) ||
+          (propId && dialogId && propId === dialogId);
+
         const payload: UpdateUserPayload = {
           name: dName.trim(),
           email: dEmail.trim(),
           role_id: Number(dRoleId),
-          ...(dPassword.trim() ? { password: dPassword.trim() } : {}),
         };
 
         const updated = await updateUser(dialog.user.id, payload);
         broadcastPermissionsChanged();
+
+        if (emailChanged && isSelf) {
+          toast.success(
+            t(
+              'roles.email_changed_logout',
+              'E-mailadres gewijzigd. Log opnieuw in met uw nieuwe e-mailadres.'
+            )
+          );
+          closeDialog();
+          logout();
+          navigate('/login', { replace: true });
+          return;
+        }
+
         toast.success(t('roles.success_user_updated', { name: updated.name }));
         closeDialog();
         await loadUsers(false);
@@ -1284,58 +1316,50 @@ export const RolesView: React.FC<RolesViewProps> = ({
                   </div>
                 </div>
 
-                {/* Password field with Lock icon & Eye toggle matching Image 2 */}
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
-                  <label
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
-                      fontSize: '10.5px',
-                      fontWeight: 700,
-                      color: '#4B5563',
-                      textTransform: 'uppercase',
-                      letterSpacing: '0.04em',
-                    }}
-                  >
-                    <span>
-                      {t('roles.password_label')}{' '}
-                      {dialog.kind === 'add' ? (
-                        <span style={{ color: '#E20714' }}>*</span>
-                      ) : (
-                        <span style={{ fontSize: '10.5px', fontWeight: 500, color: '#9CA3AF', textTransform: 'none' }}>
-                          ({t('roles.password_keep_hint')})
-                        </span>
-                      )}
-                    </span>
-                  </label>
-                  <div className="ap-password-pill-container">
-                    <Lock size={16} strokeWidth={1.75} style={{ color: '#94A3B8', flexShrink: 0, marginRight: '10px' }} />
-                    <input
-                      type={showPasswordText ? 'text' : 'password'}
-                      value={dPassword}
-                      onChange={(e) => setDPassword(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') handleSaveUser();
+                {/* Password field with Lock icon & Eye toggle - only displayed when adding a new user */}
+                {dialog.kind === 'add' && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                    <label
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        fontSize: '10.5px',
+                        fontWeight: 700,
+                        color: '#4B5563',
+                        textTransform: 'uppercase',
+                        letterSpacing: '0.04em',
                       }}
-                      placeholder={
-                        dialog.kind === 'add'
-                          ? t('roles.placeholder_password_add')
-                          : t('roles.placeholder_password_edit')
-                      }
-                      className="ap-password-pill-input"
-                    />
-                    <button
-                      type="button"
-                      className="ap-password-pill-btn"
-                      onClick={() => setShowPasswordText(!showPasswordText)}
-                      aria-label={showPasswordText ? t('roles.hide_password') : t('roles.show_password')}
-                      title={showPasswordText ? t('roles.hide_password') : t('roles.show_password')}
                     >
-                      {showPasswordText ? <EyeOff size={17} strokeWidth={1.75} /> : <Eye size={17} strokeWidth={1.75} />}
-                    </button>
+                      <span>
+                        {t('roles.password_label')}{' '}
+                        <span style={{ color: '#E20714' }}>*</span>
+                      </span>
+                    </label>
+                    <div className="ap-password-pill-container">
+                      <Lock size={16} strokeWidth={1.75} style={{ color: '#94A3B8', flexShrink: 0, marginRight: '10px' }} />
+                      <input
+                        type={showPasswordText ? 'text' : 'password'}
+                        value={dPassword}
+                        onChange={(e) => setDPassword(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') handleSaveUser();
+                        }}
+                        placeholder={t('roles.placeholder_password_add')}
+                        className="ap-password-pill-input"
+                      />
+                      <button
+                        type="button"
+                        className="ap-password-pill-btn"
+                        onClick={() => setShowPasswordText(!showPasswordText)}
+                        aria-label={showPasswordText ? t('roles.hide_password') : t('roles.show_password')}
+                        title={showPasswordText ? t('roles.hide_password') : t('roles.show_password')}
+                      >
+                        {showPasswordText ? <EyeOff size={17} strokeWidth={1.75} /> : <Eye size={17} strokeWidth={1.75} />}
+                      </button>
+                    </div>
                   </div>
-                </div>
+                )}
 
                 {dErr && (
                   <div

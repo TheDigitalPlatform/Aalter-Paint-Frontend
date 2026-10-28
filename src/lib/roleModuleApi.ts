@@ -1,4 +1,4 @@
-import { getApiBaseUrl, getAuthHeaders } from './auth';
+import { getApiBaseUrl, getAuthHeaders, handleUnauthorizedSession } from './auth';
 
 export interface ModuleItem {
   id: number;
@@ -71,7 +71,10 @@ export function getRoleBadgeStyle(roleName: string): [string, string, string] {
   return ['#F1F5F9', '#334155', '#E2E8F0'];
 }
 
-function parseApiError(data: any, defaultMsg: string): string {
+function parseApiError(data: any, defaultMsg: string, status?: number): string {
+  if (status === 401) {
+    handleUnauthorizedSession();
+  }
   if (data?.detail) {
     if (typeof data.detail === 'string') return data.detail;
     if (Array.isArray(data.detail) && data.detail.length > 0) {
@@ -103,7 +106,7 @@ export async function fetchRoleModuleMatrix(forceRefresh = false): Promise<RoleM
       const data = await res.json().catch(() => ({}));
 
       if (!res.ok) {
-        throw new Error(parseApiError(data, 'Failed to fetch role module access matrix'));
+        throw new Error(parseApiError(data, 'Failed to fetch role module access matrix', res.status));
       }
       if (data.success === false) {
         throw new Error(data.message || data.detail || 'Failed to fetch role module matrix');
@@ -152,7 +155,7 @@ export async function updateRoleModulePermissions(
   const data = await res.json().catch(() => ({}));
 
   if (!res.ok) {
-    throw new Error(parseApiError(data, 'Failed to update role module permissions'));
+    throw new Error(parseApiError(data, 'Failed to update role module permissions', res.status));
   }
   if (data.success === false) {
     throw new Error(data.message || data.detail || 'Failed to update role module permissions');

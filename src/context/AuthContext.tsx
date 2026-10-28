@@ -248,6 +248,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setPermissionsError(null);
   }, []);
 
+  // Automatically handle session invalidation / logout across tabs and 401s
+  useEffect(() => {
+    const handleUnauthorized = () => {
+      setTokenState(null);
+      setUserState(null);
+      setPermissionsError(null);
+      if (
+        typeof window !== 'undefined' &&
+        !window.location.pathname.startsWith('/login') &&
+        !window.location.pathname.startsWith('/forgot-password') &&
+        !window.location.pathname.startsWith('/reset-password')
+      ) {
+        window.location.href = '/login';
+      }
+    };
+    window.addEventListener('auth_unauthorized', handleUnauthorized);
+    return () => window.removeEventListener('auth_unauthorized', handleUnauthorized);
+  }, []);
+
   return (
     <AuthContext.Provider
       value={{

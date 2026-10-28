@@ -1,4 +1,4 @@
-import { getApiBaseUrl, getAuthHeaders } from './auth';
+import { getApiBaseUrl, getAuthHeaders, handleUnauthorizedSession } from './auth';
 
 export type FrontendModuleId =
   | 'overview'
@@ -158,7 +158,10 @@ export function getFirstAllowedModule(
 
 let activeRBACPromise: Promise<DynamicRBACPayload> | null = null;
 
-function parseApiError(data: any, fallback: string): string {
+function parseApiError(data: any, fallback: string, status?: number): string {
+  if (status === 401) {
+    handleUnauthorizedSession();
+  }
   if (data?.detail) {
     if (typeof data.detail === 'string') return data.detail;
     if (Array.isArray(data.detail) && data.detail.length > 0) {
@@ -189,7 +192,7 @@ export async function fetchDynamicRBACPermissions(forceRefresh = false): Promise
       const json = await res.json().catch(() => ({}));
 
       if (!res.ok) {
-        throw new Error(parseApiError(json, `Failed to load dynamic permissions (HTTP ${res.status})`));
+        throw new Error(parseApiError(json, `Failed to load dynamic permissions (HTTP ${res.status})`, res.status));
       }
 
       if (json.success === false) {

@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { User, Mail, Shield, ShieldCheck, Pencil, X, Save, Loader2, AlertCircle, RefreshCw } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { User, Mail, Shield, ShieldCheck, Pencil, X, Save, Loader2, AlertCircle, RefreshCw, Lock } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useTranslation } from '../../context/LanguageContext';
 import {
@@ -12,10 +13,9 @@ import {
 import { getRoleBadgeStyle } from '../../lib/roleModuleApi';
 import { toast } from 'sonner';
 
-const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
 export const ProfileView: React.FC = () => {
-  const { user, updateUser } = useAuth();
+  const { user, updateUser, logout } = useAuth();
+  const navigate = useNavigate();
   const { t, language } = useTranslation();
   const isNl = language === 'NL';
 
@@ -63,10 +63,9 @@ export const ProfileView: React.FC = () => {
 
   const initials = getInitials(profile?.name || user?.name || user?.email || '');
 
-  // Detect whether user has entered or changed text from original profile
+  // Detect whether user has changed name from original profile (Email editing is disabled per Task 107)
   const hasChanges = Boolean(
-    profile &&
-      (editName !== (profile.name || '') || editEmail !== (profile.email || ''))
+    profile && editName.trim() !== (profile.name || '').trim() && editName.trim().length > 0
   );
 
   const handleStartEdit = () => {
@@ -92,11 +91,6 @@ export const ProfileView: React.FC = () => {
     if (!editName.trim()) {
       errs.name = t('user_profile.validation_name_required', isNl ? 'Volledige naam is verplicht' : 'Full name is required');
     }
-    if (!editEmail.trim()) {
-      errs.email = t('user_profile.validation_email_invalid', isNl ? 'Voer een geldig e-mailadres in' : 'Please enter a valid email address');
-    } else if (!emailRegex.test(editEmail.trim())) {
-      errs.email = t('user_profile.validation_email_invalid', isNl ? 'Voer een geldig e-mailadres in' : 'Please enter a valid email address');
-    }
     setErrors(errs);
     return Object.keys(errs).length === 0;
   };
@@ -109,7 +103,7 @@ export const ProfileView: React.FC = () => {
     try {
       const updated = await updateMyProfile({
         name: editName.trim(),
-        email: editEmail.trim(),
+        email: profile?.email || editEmail || '',
       });
 
       // Update local state with actual backend response
@@ -127,6 +121,16 @@ export const ProfileView: React.FC = () => {
       });
 
       setIsEditing(false);
+
+      if (updated.email && profile?.email && updated.email.trim().toLowerCase() !== profile.email.trim().toLowerCase()) {
+        toast.success(
+          t('roles.email_changed_logout', 'E-mailadres gewijzigd. Log opnieuw in met uw nieuwe e-mailadres.')
+        );
+        logout();
+        navigate('/login', { replace: true });
+        return;
+      }
+
       toast.success(
         t('user_profile.update_success', isNl ? 'Profiel succesvol bijgewerkt' : 'Profile updated successfully')
       );
@@ -639,38 +643,40 @@ export const ProfileView: React.FC = () => {
                     {profile.email || '—'}
                   </div>
                 ) : (
-                  <div style={{ marginTop: '8px' }}>
+                  <div style={{ marginTop: '8px', position: 'relative' }}>
                     <input
                       type="email"
-                      value={editEmail}
-                      onChange={(e) => {
-                        setEditEmail(e.target.value);
-                        if (errors.email) setErrors((prev) => ({ ...prev, email: undefined }));
-                      }}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter' && (hasChanges || saving)) handleSave();
-                        if (e.key === 'Escape') handleCancel();
-                      }}
-                      placeholder={isNl ? 'Voer uw e-mailadres in' : 'Enter email address'}
+                      value={profile.email || editEmail || ''}
+                      disabled
+                      readOnly
+                      tabIndex={-1}
+                      title={t('user_profile.email_disabled_hint', isNl ? 'E-mailadres kan niet worden gewijzigd' : 'Email address cannot be changed')}
                       style={{
                         width: '100%',
-                        padding: '9px 13px',
+                        padding: '9px 36px 9px 13px',
                         borderRadius: '10px',
-                        border: errors.email ? '1px solid #E20714' : '1px solid #CBD5E1',
+                        border: '1px solid #CBD5E1',
                         fontSize: '14.5px',
                         fontWeight: 600,
-                        color: '#0F172A',
+                        color: '#64748B',
                         boxSizing: 'border-box',
                         outline: 'none',
-                        background: '#FFFFFF',
+                        background: '#F8FAFC',
+                        cursor: 'not-allowed',
                         fontFamily: 'inherit',
                       }}
                     />
-                    {errors.email && (
-                      <p style={{ margin: '4px 0 0', fontSize: '11.5px', color: '#E20714', fontWeight: 500 }}>
-                        {errors.email}
-                      </p>
-                    )}
+                    <Lock
+                      size={14}
+                      style={{
+                        position: 'absolute',
+                        right: '12px',
+                        top: '50%',
+                        transform: 'translateY(-50%)',
+                        color: '#94A3B8',
+                        pointerEvents: 'none',
+                      }}
+                    />
                   </div>
                 )}
               </div>

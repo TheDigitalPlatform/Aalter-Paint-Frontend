@@ -1,4 +1,4 @@
-import { getApiBaseUrl, getAuthHeaders } from './auth';
+import { getApiBaseUrl, getAuthHeaders, handleUnauthorizedSession } from './auth';
 
 export interface RoleObject {
   id: number;
@@ -60,7 +60,10 @@ export interface FetchUsersResponse {
   total: number;
 }
 
-function parseApiError(data: any, defaultMsg: string): string {
+function parseApiError(data: any, defaultMsg: string, status?: number): string {
+  if (status === 401) {
+    handleUnauthorizedSession();
+  }
   if (data?.detail) {
     if (typeof data.detail === 'string') return data.detail;
     if (Array.isArray(data.detail) && data.detail.length > 0) {
@@ -79,7 +82,7 @@ export async function fetchMyProfile(): Promise<UserRow> {
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
-    throw new Error(parseApiError(data, 'Failed to fetch profile'));
+    throw new Error(parseApiError(data, 'Failed to fetch profile', res.status));
   }
   if (data.success === false) {
     throw new Error(data.message || data.detail || 'Failed to fetch profile');
@@ -99,7 +102,7 @@ export async function updateMyProfile(payload: ProfileUpdatePayload): Promise<Us
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
-    throw new Error(parseApiError(data, 'Failed to update profile'));
+    throw new Error(parseApiError(data, 'Failed to update profile', res.status));
   }
   if (data.success === false) {
     throw new Error(data.message || data.detail || 'Failed to update profile');
@@ -114,7 +117,7 @@ export async function fetchUsers(skip = 0, limit = 100): Promise<UserRow[]> {
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
-    throw new Error(parseApiError(data, 'Failed to fetch users'));
+    throw new Error(parseApiError(data, 'Failed to fetch users', res.status));
   }
   if (data.success === false) {
     throw new Error(data.message || data.detail || 'Failed to fetch users');
@@ -132,7 +135,7 @@ export async function fetchRoles(skip = 0, limit = 100): Promise<RoleObject[]> {
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
-    throw new Error(parseApiError(data, 'Failed to fetch roles'));
+    throw new Error(parseApiError(data, 'Failed to fetch roles', res.status));
   }
   if (data.success === false) {
     throw new Error(data.message || data.detail || 'Failed to fetch roles');
@@ -152,7 +155,7 @@ export async function createUser(payload: CreateUserPayload): Promise<UserRow> {
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
-    throw new Error(parseApiError(data, 'Failed to create user'));
+    throw new Error(parseApiError(data, 'Failed to create user', res.status));
   }
   if (data.success === false) {
     throw new Error(data.message || data.detail || 'Failed to create user');
@@ -168,7 +171,7 @@ export async function deleteUser(userId: string | number): Promise<void> {
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
-    throw new Error(parseApiError(data, 'Failed to delete user'));
+    throw new Error(parseApiError(data, 'Failed to delete user', res.status));
   }
   if (data.success === false) {
     throw new Error(data.message || data.detail || 'Failed to delete user');
@@ -182,7 +185,7 @@ export async function fetchUserById(userId: string | number): Promise<UserRow> {
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
-    throw new Error(parseApiError(data, 'Failed to fetch user'));
+    throw new Error(parseApiError(data, 'Failed to fetch user', res.status));
   }
   if (data.success === false) {
     throw new Error(data.message || data.detail || 'Failed to fetch user');
@@ -202,7 +205,7 @@ export async function updateUser(userId: string | number, payload: UpdateUserPay
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
-    throw new Error(parseApiError(data, 'Failed to update user'));
+    throw new Error(parseApiError(data, 'Failed to update user', res.status));
   }
   if (data.success === false) {
     throw new Error(data.message || data.detail || 'Failed to update user');
