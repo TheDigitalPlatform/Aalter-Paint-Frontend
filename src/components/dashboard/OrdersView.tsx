@@ -1,17 +1,105 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { ConfidenceBadge } from '../common/ConfidenceBadge';
 import { type Language } from '../common/LanguageToggle';
 import { useLanguage } from '../../context/LanguageContext';
-import { INITIAL_ORDERS } from '../../data/mockData';
+import { INITIAL_ORDERS, type OrderItem } from '../../data/mockData';
+import { fetchOrders, type OrderListItem, type OrderInsightsSummary } from '../../lib/ordersApi';
 
 interface OrdersViewProps {
   language?: Language;
-  onOpenOrder?: (orderNr: string) => void;
+  onOpenOrder?: (orderNr: string, orderId?: number, emailId?: number) => void;
   onNavigateToExceptions?: () => void;
 }
 
 type SortKey = 'nr' | 'klant' | 'received' | 'conf';
 type SortDir = 'asc' | 'desc';
+
+function mapApiOrderToOrderItem(apiOrder: OrderListItem, isNl: boolean): OrderItem {
+  let day = '';
+  let time = '';
+  let min = 0;
+  if (apiOrder.received_at) {
+    const d = new Date(apiOrder.received_at);
+    day = d.toLocaleDateString(isNl ? 'nl-BE' : 'en-GB', {
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+    });
+    time = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    min = d.getHours() * 60 + d.getMinutes();
+  }
+
+  let mb: 'info' | 'bestel' | 'persoonlijk' = 'info';
+  const mbStr = (apiOrder.mailbox || '').toLowerCase();
+  if (mbStr.includes('bestel')) mb = 'bestel';
+  else if (mbStr.includes('persoonlijk') || mbStr.includes('personal')) mb = 'persoonlijk';
+
+  const avg =
+    apiOrder.confidence != null
+      ? Math.round(apiOrder.confidence <= 1 ? apiOrder.confidence * 100 : apiOrder.confidence)
+      : null;
+
+  const stLower = (apiOrder.status || '').toLowerCase();
+  let st: 'pending' | 'verwerking' | 'klaar' | 'aandacht' | 'goedgekeurd' | 'afgewezen' | 'gesync' | 'syncfout' = 'pending';
+  if (stLower === 'processing') st = 'verwerking';
+  else if (stLower === 'ready_for_review' || stLower === 'completed') st = 'klaar';
+  else if (stLower === 'needs_attention' || stLower === 'needs_review') st = 'aandacht';
+  else if (stLower === 'approved') st = 'goedgekeurd';
+  else if (stLower === 'rejected') st = 'afgewezen';
+  else if (stLower === 'synchronized' || stLower === 'gesync') st = 'gesync';
+  else if (stLower === 'failed' || stLower === 'syncfout') st = 'syncfout';
+
+  let ref = apiOrder.customer_reference || '';
+  let klantNr = '';
+  if (ref.includes('·')) {
+    const parts = ref.split('·');
+    ref = parts[0].trim();
+    klantNr = parts.slice(1).join('·').trim();
+  } else if (ref.includes('K-')) {
+    klantNr = ref.substring(ref.indexOf('K-')).trim();
+    ref = ref.substring(0, ref.indexOf('K-')).trim().replace(/[-·,\s]+$/, '');
+  }
+
+  return {
+    nr: apiOrder.order_number || `AP-26-${String(apiOrder.order_id).padStart(5, '0')}`,
+    klant: apiOrder.customer_name || (isNl ? 'Onbekende klant' : 'Unknown customer'),
+    klantNr: klantNr || 'K-10289',
+    klantConf: avg ?? 95,
+    klantWhy: '',
+    ref: ref || 'MZ-2214',
+    day,
+    time,
+    min,
+    mb,
+    from: '',
+    subject: '',
+    body: '',
+    att: '',
+    ocr: avg,
+    ocrKind: 'Getypte PDF',
+    st,
+    lines: Array.from({ length: apiOrder.lines_count || 0 }, (_, i) => ({
+      id: String(i + 1),
+      raw: '',
+      art: '',
+      qty: 1,
+      unit: 'L',
+      conf: avg ?? 90,
+      why: '',
+      bonQty: '1',
+      confirmed: false,
+      corrected: false,
+      by: 'AI',
+    })),
+    lines_count: apiOrder.lines_count,
+    apiConfidenceSummary: apiOrder.confidence_summary,
+    apiOutlookStatus: apiOrder.outlook_status,
+    rawReceivedAt: apiOrder.received_at || apiOrder.created_at,
+    order_id: apiOrder.order_id,
+    email_id: apiOrder.email_id,
+    ...(apiOrder.confidence_summary ? { confWhy: apiOrder.confidence_summary } : {}),
+  } as OrderItem;
+}
 
 export const OrdersView: React.FC<OrdersViewProps> = ({
   language,
@@ -27,19 +115,71 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
   const [fMailbox, setFMailbox] = useState('alle');
   const [fAttention, setFAttention] = useState(false);
   const [fLong, setFLong] = useState(false);
+  const [fUncertain, setFUncertain] = useState(false);
   const [sortKey, setSortKey] = useState<SortKey>('received');
   const [sortDir, setSortDir] = useState<SortDir>('desc');
 
+  // Live API State
+  const [liveOrders, setLiveOrders] = useState<OrderListItem[] | null>(null);
+  const [insightsSummary, setInsightsSummary] = useState<OrderInsightsSummary | null>(null);
+  const [loading, setLoading] = useState<boolean>(false);
+
   const threshold = 70;
+
+  // Fetch orders from GET /api/orders
+  useEffect(() => {
+    let isCancelled = false;
+    setLoading(true);
+
+    fetchOrders({
+      search: search.trim() || undefined,
+      status: fStatus !== 'alle' ? fStatus : undefined,
+      mailbox: fMailbox !== 'alle' ? fMailbox : undefined,
+      extra_attention: fAttention ? true : undefined,
+      waiting_longer_than_4_hours: fLong ? true : undefined,
+      uncertain_only: fUncertain ? true : undefined,
+    })
+      .then((data) => {
+        console.log('[OrdersView] Live GET /api/orders data received:', data);
+        if (!isCancelled) {
+          setLiveOrders(data.items || []);
+          setInsightsSummary(data.insights);
+          const liveTotal = data.insights?.total_orders ?? (
+            (!fAttention && !fLong && !fUncertain && !search.trim() && fStatus === 'alle' && fMailbox === 'alle')
+              ? data.total
+              : undefined
+          );
+          if (typeof liveTotal === 'number') {
+            window.dispatchEvent(new CustomEvent('orders_count_updated', { detail: liveTotal }));
+          }
+        }
+      })
+      .catch((err) => {
+        console.error('[OrdersView] GET /api/orders request failed:', err);
+      })
+      .finally(() => {
+        if (!isCancelled) setLoading(false);
+      });
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [search, fStatus, fMailbox, fAttention, fLong, fUncertain]);
+
+  // Determine source data (uses live API data once loaded, even if 0 items)
+  const sourceOrders = useMemo(() => {
+    if (liveOrders !== null) {
+      return liveOrders.map((apiOrder) => mapApiOrderToOrderItem(apiOrder, isNl));
+    }
+    return INITIAL_ORDERS;
+  }, [liveOrders, isNl]);
 
   // Process order views
   const processedOrders = useMemo(() => {
-    return INITIAL_ORDERS.map((o) => {
+    return sourceOrders.map((o) => {
       const lines = o.lines || [];
-      const n = lines.length;
-      const avg = n
-        ? Math.round(lines.reduce((t, l) => t + l.conf, 0) / n)
-        : null;
+      const n = (o as any).lines_count !== undefined ? (o as any).lines_count : lines.length;
+      const avg = o.ocr != null ? o.ocr : (n ? Math.round(lines.reduce((t, l) => t + l.conf, 0) / n) : null);
       const under = lines.filter((l) => l.conf < threshold).length;
 
       // Status derivation
@@ -54,8 +194,19 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
       }
 
       // Waiting calculation
-      const waitH = isPending || isProcessing ? (990 - o.min) / 60 : 0;
-      const isLongOrder = isPending && waitH > 4;
+      let waitH = 0;
+      const rawDate = (o as any).rawReceivedAt;
+      if (rawDate) {
+        const receivedMs = new Date(rawDate).getTime();
+        if (!isNaN(receivedMs)) {
+          waitH = Math.max(0, (Date.now() - receivedMs) / (1000 * 60 * 60));
+        }
+      } else {
+        waitH = isPending || isProcessing ? (990 - o.min) / 60 : 0;
+      }
+      const isLongOrder =
+        (waitH > 4 && st !== 'gesync' && st !== 'goedgekeurd') ||
+        (isPending && (990 - o.min) / 60 > 4);
 
       // Status labels and styling
       let stLabel = '';
@@ -132,19 +283,21 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
       if (o.mb === 'persoonlijk') mbLabel = isNl ? 'Persoonlijk' : 'Personal';
 
       // Under threshold text
-      let underTxt = '';
-      if (n > 0) {
-        if (under > 0) {
-          underTxt = isNl
-            ? `${under} van ${n} regels onder de drempel`
-            : `${under} of ${n} lines below threshold`;
+      let underTxt = (o as any).apiConfidenceSummary;
+      if (!underTxt) {
+        if (n > 0) {
+          if (under > 0) {
+            underTxt = isNl
+              ? `${under} van ${n} regels onder de drempel`
+              : `${under} of ${n} lines below threshold`;
+          } else {
+            underTxt = isNl
+              ? 'alle regels boven drempel'
+              : 'all lines above threshold';
+          }
         } else {
-          underTxt = isNl
-            ? 'alle regels boven drempel'
-            : 'all lines above threshold';
+          underTxt = isNl ? 'OCR en AI-matching lopen' : 'OCR and AI matching running';
         }
-      } else {
-        underTxt = isNl ? 'OCR en AI-matching lopen' : 'OCR and AI matching running';
       }
 
       const confWhy = n
@@ -165,7 +318,7 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
         stBg,
         stFg,
         stBd,
-        tagLabel,
+        tagLabel: (o as any).apiOutlookStatus || tagLabel,
         tagColor,
         mbLabel,
         underTxt,
@@ -176,7 +329,7 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
         isLongOrder,
       };
     });
-  }, [isNl]);
+  }, [sourceOrders, isNl]);
 
   // Filtered rows
   const filteredRows = useMemo(() => {
@@ -185,7 +338,17 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
     return processedOrders.filter((o) => {
       const matchSearch =
         !q ||
-        (o.nr + ' ' + o.klant + ' ' + o.ref).toLowerCase().indexOf(q) >= 0;
+        (String(o.nr || '') + ' ' + String(o.klant || '') + ' ' + String(o.ref || '')).toLowerCase().indexOf(q) >= 0;
+
+      // When live API is active, the backend handles server-side filtering
+      if (liveOrders !== null) {
+        if (fUncertain) {
+          const isAttention = o.st === 'aandacht';
+          const isLowConf = o.avg !== null && o.avg <= 70;
+          if (!isAttention || !isLowConf) return false;
+        }
+        return matchSearch;
+      }
 
       const matchStatus =
         fStatus === 'alle' ||
@@ -194,16 +357,18 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
       const matchMailbox = fMailbox === 'alle' || o.mb === fMailbox;
       const matchAttention = !fAttention || o.st === 'aandacht';
       const matchLong = !fLong || o.isLongOrder;
+      const matchUncertain = !fUncertain || (o.st === 'aandacht' && o.avg !== null && o.avg <= 70);
 
       return (
         matchSearch &&
         matchStatus &&
         matchMailbox &&
         matchAttention &&
-        matchLong
+        matchLong &&
+        matchUncertain
       );
     });
-  }, [processedOrders, search, fStatus, fMailbox, fAttention, fLong]);
+  }, [processedOrders, search, fStatus, fMailbox, fAttention, fLong, fUncertain, liveOrders]);
 
   // Sorted rows
   const sortedRows = useMemo(() => {
@@ -252,34 +417,42 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
     setFMailbox('alle');
     setFAttention(false);
     setFLong(false);
+    setFUncertain(false);
   };
 
   // Compact Insights Cards
   const compactInsights = [
     {
       id: 'ci-1',
-      value: 3,
+      value: insightsSummary ? insightsSummary.uncertain_matches : 3,
       color: '#8A3405',
       title: isNl ? 'onzekere matches' : 'uncertain matches',
       short: isNl
-        ? 'regels onder 70% in 2 orders'
-        : 'lines below 70% in 2 orders',
+        ? 'regels onder 70% in orders'
+        : 'lines below 70% in orders',
       d: 60,
       onClick: () => {
-        setFAttention(true);
-        setFStatus('alle');
-        setFMailbox('alle');
-        setFLong(false);
+        if (fUncertain) {
+          setFUncertain(false);
+          setFAttention(false);
+        } else {
+          setFUncertain(true);
+          setFAttention(true);
+          setFStatus('alle');
+          setFMailbox('alle');
+          setFLong(false);
+        }
       },
     },
     {
       id: 'ci-2',
-      value: 1,
+      value: insightsSummary ? insightsSummary.missing_quantities : 1,
       color: '#A61B1B',
       title: isNl ? 'ontbrekende hoeveelheden' : 'missing quantities',
-      short: 'open AP-26-04818',
+      short: isNl ? 'openstaande orders controleren' : 'open orders to review',
       d: 120,
       onClick: () => {
+        setFUncertain(false);
         if (onOpenOrder) {
           onOpenOrder('AP-26-04818');
         } else {
@@ -289,7 +462,7 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
     },
     {
       id: 'ci-3',
-      value: 1,
+      value: insightsSummary ? insightsSummary.waiting_over_4h : 1,
       color: '#A61B1B',
       title: isNl ? 'wachten > 4 uur' : 'waiting > 4 hours',
       short: isNl
@@ -297,14 +470,20 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
         : 'orders that must go out today',
       d: 180,
       onClick: () => {
-        setFLong(true);
-        setFStatus('open');
-        setFAttention(false);
+        if (fLong) {
+          setFLong(false);
+          setFStatus('alle');
+        } else {
+          setFUncertain(false);
+          setFLong(true);
+          setFAttention(false);
+          setFStatus('alle');
+        }
       },
     },
     {
       id: 'ci-4',
-      value: 2,
+      value: insightsSummary ? insightsSummary.failed_syncs : 2,
       color: '#A61B1B',
       title: isNl ? 'mislukte BC-syncs' : 'failed BC syncs',
       short: isNl
@@ -312,6 +491,7 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
         : 'to follow up in exceptions',
       d: 240,
       onClick: () => {
+        setFUncertain(false);
         if (onNavigateToExceptions) {
           onNavigateToExceptions();
         } else {
@@ -406,7 +586,11 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
                 gap: '4px',
                 padding: '12px 14px',
                 background: '#FFFFFF',
-                border: '1px solid #E8D27A',
+                border: (c.id === 'ci-1' && fUncertain)
+                  ? '2px solid #8A3405'
+                  : (c.id === 'ci-3' && fLong)
+                  ? '2px solid #A61B1B'
+                  : '1px solid #E8D27A',
                 borderRadius: 0,
                 textAlign: 'left',
                 color: '#242424',
@@ -501,7 +685,10 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
           Status
           <select
             value={fStatus}
-            onChange={(e) => setFStatus(e.target.value)}
+            onChange={(e) => {
+              setFStatus(e.target.value);
+              setFUncertain(false);
+            }}
             style={{
               height: '44px',
               padding: '0 10px',
@@ -564,7 +751,12 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
           <input
             type="checkbox"
             checked={fAttention}
-            onChange={(e) => setFAttention(e.target.checked)}
+            onChange={(e) => {
+              setFAttention(e.target.checked);
+              if (!e.target.checked) {
+                setFUncertain(false);
+              }
+            }}
             style={{ width: '18px', height: '18px', accentColor: '#E20714' }}
           />
           {isNl ? 'Enkel extra aandacht' : 'Only extra attention'}
@@ -585,7 +777,12 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
           <input
             type="checkbox"
             checked={fLong}
-            onChange={(e) => setFLong(e.target.checked)}
+            onChange={(e) => {
+              setFLong(e.target.checked);
+              if (e.target.checked) {
+                setFUncertain(false);
+              }
+            }}
             style={{ width: '18px', height: '18px', accentColor: '#E20714' }}
           />
           {isNl ? 'Wacht langer dan 4 uur' : 'Waiting longer than 4 hours'}
@@ -712,7 +909,7 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
             <button
               key={o.nr}
               className="a-stag row"
-              onClick={() => onOpenOrder && onOpenOrder(o.nr)}
+              onClick={() => onOpenOrder && onOpenOrder(o.nr, (o as any).order_id, (o as any).email_id)}
               style={{
                 animationDelay: `${Math.min(idx, 12) * 35}ms`,
                 display: 'grid',

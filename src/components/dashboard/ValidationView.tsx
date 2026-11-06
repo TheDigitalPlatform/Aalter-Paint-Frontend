@@ -3,6 +3,7 @@ import { toast } from 'sonner';
 import { ConfidenceBadge } from '../common/ConfidenceBadge';
 import { type Language } from '../common/LanguageToggle';
 import { useLanguage } from '../../context/LanguageContext';
+import { fetchOrderById, fetchOrderByEmailId, updateOrderLine, type OrderDetail } from '../../lib/ordersApi';
 import {
   INITIAL_ORDERS,
   CAT,
@@ -15,15 +16,323 @@ import {
 interface ValidationViewProps {
   language?: Language;
   selectedOrderNr?: string;
+  selectedOrderId?: number;
+  selectedEmailId?: number;
   userName?: string;
   onNavigateToOrders?: () => void;
   onNavigateToExceptions?: () => void;
   onOrderUpdated?: (order: OrderItem) => void;
 }
 
+export function resolveProductUnit(
+  unit?: string | null,
+  packaging?: string | null,
+  description?: string | null,
+  artCode?: string | null
+): string {
+  // 1. Check direct unit string first if explicitly provided (e.g. from DB or user dropdown)
+  if (unit) {
+    const clean = unit.trim().toLowerCase();
+    if (clean === 'bucket' || clean === 'emmer') return 'emmer';
+    if (clean === 'can' || clean === 'blik') return 'blik';
+    if (clean === 'kit') return 'kit';
+    if (clean === 'piece' || clean === 'stuk' || clean === 'st') return 'stuk';
+    if (clean === 'drum' || clean === 'vat') return 'vat';
+    if (clean === 'pot') return 'pot';
+    if (clean && clean !== 'null' && clean !== 'undefined') {
+      return clean;
+    }
+  }
+
+  // 2. Check catalog definition if item is registered
+  if (artCode && CAT[artCode]?.unit) {
+    const catU = CAT[artCode].unit.toLowerCase();
+    if (catU === 'emmer' || catU === 'bucket' || catU === 'pail') return 'emmer';
+    if (catU === 'kit') return 'kit';
+    if (catU === 'vat' || catU === 'drum') return 'vat';
+    if (catU === 'pot') return 'pot';
+    if (catU === 'stuk' || catU === 'piece' || catU === 'st') return 'stuk';
+    if (catU === 'blik' || catU === 'can') return 'blik';
+    return catU;
+  }
+
+  // 2. Combine all text clues from unit, packaging, and description
+  const combined = `${unit || ''} ${packaging || ''} ${description || ''}`.toLowerCase();
+
+  // Bucket / Emmer indicators (e.g. "emmer", "bucket", "pail", "seau", "20kg", "25kg")
+  if (
+    combined.includes('emmer') ||
+    combined.includes('bucket') ||
+    combined.includes('pail') ||
+    combined.includes('seau') ||
+    combined.includes('20kg') ||
+    combined.includes('25kg')
+  ) {
+    return 'emmer';
+  }
+
+  // Kit / Set indicators
+  if (combined.includes('kit') || combined.includes('set') || combined.includes('comp')) {
+    return 'kit';
+  }
+
+  // Drum / Vat indicators
+  if (
+    combined.includes('vat') ||
+    combined.includes('drum') ||
+    combined.includes('barrel') ||
+    combined.includes('ton') ||
+    combined.includes('200l')
+  ) {
+    return 'vat';
+  }
+
+  // Pot / Jar indicators
+  if (combined.includes('pot') || combined.includes('jar') || combined.includes('bocal')) {
+    return 'pot';
+  }
+
+  // Piece / Stuk indicators
+  if (
+    combined.includes('stuk') ||
+    combined.includes('piece') ||
+    combined.includes('st.') ||
+    combined.includes('pcs') ||
+    combined.includes('pc')
+  ) {
+    return 'stuk';
+  }
+
+  // Can / Blik indicators
+  if (
+    combined.includes('blik') ||
+    combined.includes('can') ||
+    combined.includes('tin') ||
+    combined.includes('bus') ||
+    combined.includes('bidon')
+  ) {
+    return 'blik';
+  }
+
+  // Direct unit string normalization if provided
+  const clean = (unit || '').trim().toLowerCase();
+  if (clean === 'bucket' || clean === 'emmer') return 'emmer';
+  if (clean === 'can' || clean === 'blik') return 'blik';
+  if (clean === 'kit') return 'kit';
+  if (clean === 'piece' || clean === 'stuk') return 'stuk';
+  if (clean === 'drum' || clean === 'vat') return 'vat';
+  if (clean === 'pot') return 'pot';
+
+  if (clean && clean !== 'null' && clean !== 'undefined') {
+    return clean;
+  }
+
+  return 'blik';
+}
+
+export function formatUnitLabel(u?: string | null, isNl = false): string {
+  const lower = (u || '').toLowerCase().trim();
+  if (lower === 'emmer' || lower === 'bucket') return isNl ? 'emmer' : 'bucket';
+  if (lower === 'blik' || lower === 'can') return isNl ? 'blik' : 'can';
+  if (lower === 'stuk' || lower === 'piece') return isNl ? 'stuk' : 'piece';
+  if (lower === 'vat' || lower === 'drum') return isNl ? 'vat' : 'drum';
+  if (lower === 'kit') return 'kit';
+  if (lower === 'pot') return 'pot';
+  return u || (isNl ? 'blik' : 'can');
+}
+
+function mapOrderDetailToOrderItem(apiOrder: OrderDetail, isNl: boolean): OrderItem {
+  let day = '04/11/2026';
+  let time = '12:00';
+  let min = 720;
+  const rawDate = apiOrder.received_at || apiOrder.created_at;
+  if (rawDate) {
+    try {
+      const d = new Date(rawDate);
+      if (!isNaN(d.getTime())) {
+        day = `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`;
+        time = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+        min = d.getHours() * 60 + d.getMinutes();
+      }
+    } catch {}
+  }
+
+  let mb: 'info' | 'bestel' | 'persoonlijk' = 'info';
+  const mbStr = (apiOrder.mailbox || '').toLowerCase();
+  if (mbStr.includes('bestel')) mb = 'bestel';
+  else if (mbStr.includes('persoonlijk') || mbStr.includes('personal')) mb = 'persoonlijk';
+
+  const avg =
+    apiOrder.confidence != null
+      ? Math.round(apiOrder.confidence <= 1 ? apiOrder.confidence * 100 : apiOrder.confidence)
+      : null;
+
+  const stLower = (apiOrder.status || '').toLowerCase();
+  let st: 'pending' | 'verwerking' | 'klaar' | 'aandacht' | 'goedgekeurd' | 'afgewezen' | 'gesync' | 'syncfout' = 'pending';
+  if (stLower === 'processing') st = 'verwerking';
+  else if (stLower === 'ready_for_review' || stLower === 'completed') st = 'klaar';
+  else if (stLower === 'needs_attention' || stLower === 'needs_review') st = 'aandacht';
+  else if (stLower === 'approved') st = 'goedgekeurd';
+  else if (stLower === 'rejected') st = 'afgewezen';
+  else if (stLower === 'synchronized' || stLower === 'gesync') st = 'gesync';
+  else if (stLower === 'failed' || stLower === 'syncfout') st = 'syncfout';
+
+  let ref = apiOrder.customer_reference || '';
+  let klantNr = 'K-10289';
+  if (ref.includes('·')) {
+    const parts = ref.split('·');
+    ref = parts[0].trim();
+    klantNr = parts.slice(1).join('·').trim();
+  } else if (ref.includes('K-')) {
+    klantNr = ref.substring(ref.indexOf('K-')).trim();
+    ref = ref.substring(0, ref.indexOf('K-')).trim().replace(/[-·,\s]+$/, '');
+  }
+
+  const orderNr = apiOrder.order_number || `AP-26-${String(apiOrder.order_id).padStart(5, '0')}`;
+
+  const lines: OrderLine[] = (apiOrder.lines || []).map((l, i) => {
+    const lineConf =
+      l.confidence != null
+        ? Math.round(l.confidence <= 1 ? l.confidence * 100 : l.confidence)
+        : (avg ?? 70);
+
+    const itemCode =
+      (l as any).product_reference ||
+      l.item_code ||
+      (l as any).product_description ||
+      l.description ||
+      `ART-${i + 1}`;
+    const rawText =
+      (l as any).product_description ||
+      l.description ||
+      (l as any).product_reference ||
+      l.item_code ||
+      `Regel ${i + 1}`;
+    const pack = l.packaging || (l as any).unit || l.unit_of_measure || '10L';
+    const detectedUnit = resolveProductUnit(
+      (l as any).unit || l.unit_of_measure,
+      l.packaging,
+      rawText,
+      itemCode
+    );
+    const rawQtyStr = l.quantity !== null && l.quantity !== undefined ? String(l.quantity) : '';
+    const numQty = rawQtyStr !== '' && !isNaN(parseFloat(rawQtyStr)) ? parseFloat(rawQtyStr) : null;
+    const dbLineId = (l as any).id || l.line_id;
+    const lineNumber = l.line_number || i + 1;
+
+    if (itemCode && !CAT[itemCode]) {
+      CAT[itemCode] = {
+        d: rawText,
+        fam: itemCode.split(/[-0-9]/)[0] || 'GEN',
+        pack,
+        unit: detectedUnit,
+      };
+    }
+
+    const whyText =
+      lineConf < 70
+        ? (isNl
+            ? 'Lage score: controleer artikel, verpakking en hoeveelheid voor deze regel.'
+            : 'Low score: please verify article, packaging and quantity for this line.')
+        : (isNl
+            ? 'Hoge score: product, code en verpakking komen overeen.'
+            : 'High score: product, code and packaging match.');
+
+    return {
+      id: `${orderNr}-${dbLineId || lineNumber}`,
+      dbLineId,
+      lineNumber,
+      orderId: apiOrder.order_id,
+      raw: rawText,
+      art: itemCode,
+      qty: numQty,
+      unit: detectedUnit,
+      conf: lineConf,
+      why: l.source_evidence?.reason || (l as any).field_evidence?.reason || whyText,
+      want: l.source_evidence?.want || { pack },
+      alts: l.source_evidence?.alts || [],
+      bonQty: rawQtyStr || (numQty != null ? String(numQty) : ''),
+      confirmed: l.status === 'confirmed' || l.status === 'approved',
+      corrected: l.status === 'corrected',
+      by: l.source_evidence?.by || '',
+    };
+  });
+
+  return {
+    nr: orderNr,
+    klant: apiOrder.customer_name || (isNl ? 'Onbekende klant' : 'Unknown customer'),
+    klantNr: klantNr || 'K-10289',
+    klantConf: avg ?? 95,
+    klantWhy: apiOrder.email_sender
+      ? (isNl
+          ? `Afzender ${apiOrder.email_sender} gekoppeld aan ${apiOrder.customer_name || 'klant'}`
+          : `Sender ${apiOrder.email_sender} linked to ${apiOrder.customer_name || 'customer'}`)
+      : '',
+    ref: ref || 'MZ-2214',
+    day,
+    time,
+    min,
+    mb,
+    from:
+      apiOrder.email_sender ||
+      (apiOrder.mailbox ? `${apiOrder.mailbox}@aalterpaint.be` : 'info@aalterpaint.be'),
+    subject:
+      apiOrder.email_subject || (isNl ? `Bestelling ${orderNr}` : `Order ${orderNr}`),
+    body:
+      apiOrder.email_body ||
+      (isNl
+        ? 'Geen emailinhoud beschikbaar voor deze order.'
+        : 'No email body available for this order.'),
+    att: `bestelbon_${orderNr.replace(/-/g, '_')}.pdf`,
+    ocr: avg ?? 91,
+    ocrKind: isNl ? 'Gescande getypte bon' : 'Scanned typed slip',
+    ocrWhy: isNl
+      ? 'Hoge score: scan van een getypte bon, goed leesbaar'
+      : 'High score: scan of a typed slip, clearly legible',
+    st,
+    lines,
+    rawReceivedAt: rawDate,
+    outlook_status: apiOrder.outlook_status,
+    order_id: apiOrder.order_id,
+    email_id: apiOrder.email_id,
+  } as OrderItem;
+}
+
+export function getOrderIdFromOrder(order?: OrderItem | null, selectedOrderId?: number): number | undefined {
+  if (selectedOrderId) {
+    return selectedOrderId > 1000000 ? selectedOrderId % 100000 : selectedOrderId;
+  }
+  if (!order) return undefined;
+  if ((order as any).order_id) {
+    const oid = (order as any).order_id;
+    return oid > 1000000 ? oid % 100000 : oid;
+  }
+  if (order.nr) {
+    const parts = order.nr.split('-');
+    const last = parts[parts.length - 1];
+    const parsed = parseInt(last, 10);
+    if (!isNaN(parsed) && parsed > 0) {
+      return parsed > 1000000 ? parsed % 100000 : parsed;
+    }
+  }
+  return undefined;
+}
+
+export function getLineIdFromLine(line?: OrderLine | null, fallbackLineIdStr?: string): number | undefined {
+  if (!line && !fallbackLineIdStr) return undefined;
+  const raw = (line as any)?.dbLineId || (line as any)?.lineNumber || (fallbackLineIdStr ? fallbackLineIdStr.split('-').pop() : undefined);
+  if (raw !== undefined && raw !== null) {
+    const parsed = parseInt(String(raw), 10);
+    return !isNaN(parsed) ? parsed : undefined;
+  }
+  return undefined;
+}
+
 export const ValidationView: React.FC<ValidationViewProps> = ({
   language,
   selectedOrderNr = 'AP-26-04819',
+  selectedOrderId,
+  selectedEmailId,
   userName = 'Bart Van Damme',
   onNavigateToOrders,
   onNavigateToExceptions,
@@ -37,6 +346,9 @@ export const ValidationView: React.FC<ValidationViewProps> = ({
   // Local copy of orders for interactive state
   const [orders, setOrders] = useState<OrderItem[]>(() => INITIAL_ORDERS);
   const [currentNr, setCurrentNr] = useState(selectedOrderNr);
+  const [loadingOrder, setLoadingOrder] = useState<boolean>(false);
+  const [liveOrder, setLiveOrder] = useState<OrderItem | null>(null);
+  const [confirmingLineId, setConfirmingLineId] = useState<string | null>(null);
 
   // Sync prop changes
   useEffect(() => {
@@ -45,9 +357,126 @@ export const ValidationView: React.FC<ValidationViewProps> = ({
     }
   }, [selectedOrderNr]);
 
+  // Fetch live order data using GET /api/orders/{order_id} or GET /api/orders/by-email/{email_id}
+  useEffect(() => {
+    let isCancelled = false;
+
+    const orderIdToFetch =
+      selectedOrderId !== undefined
+        ? (selectedOrderId > 1000000 ? selectedOrderId % 100000 : selectedOrderId)
+        : (() => {
+            if (!selectedOrderNr) return undefined;
+            const parts = selectedOrderNr.split('-');
+            const lastPart = parts[parts.length - 1];
+            const parsed = parseInt(lastPart, 10);
+            return !isNaN(parsed) && parsed > 0 ? parsed : undefined;
+          })();
+
+    const mergeCachedEdits = (item: OrderItem): OrderItem => {
+      try {
+        const cached = sessionStorage.getItem(`order_edits_${item.nr}`);
+        if (cached) {
+          const parsedLines = JSON.parse(cached);
+          if (Array.isArray(parsedLines)) {
+            const mergedLines = item.lines.map((l, idx) => {
+              const match = parsedLines.find((pl: any) => pl.id === l.id) || parsedLines[idx];
+              if (match) {
+                return {
+                  ...l,
+                  qty: match.qty !== undefined ? match.qty : l.qty,
+                  bonQty: match.bonQty !== undefined ? match.bonQty : l.bonQty,
+                  unit: match.unit || l.unit,
+                  art: match.art || l.art,
+                  confirmed: match.confirmed !== undefined ? match.confirmed : l.confirmed,
+                };
+              }
+              return l;
+            });
+            return { ...item, lines: mergedLines };
+          }
+        }
+      } catch {}
+      return item;
+    };
+
+    if (orderIdToFetch !== undefined) {
+      setLoadingOrder(true);
+      fetchOrderById(orderIdToFetch)
+        .then((orderDetail) => {
+          if (!isCancelled && orderDetail) {
+            const mapped = mergeCachedEdits(mapOrderDetailToOrderItem(orderDetail, isNl));
+            setLiveOrder(mapped);
+            setOrders((prev) => {
+              const idx = prev.findIndex((o) => o.nr === mapped.nr);
+              if (idx >= 0) {
+                const next = [...prev];
+                next[idx] = mapped;
+                return next;
+              }
+              return [mapped, ...prev];
+            });
+            setCurrentNr(mapped.nr);
+          }
+        })
+        .catch((err) => {
+          // If fetch by ID fails and email ID is available, attempt by-email
+          if (selectedEmailId !== undefined) {
+            fetchOrderByEmailId(selectedEmailId)
+              .then((orderDetail) => {
+                if (!isCancelled && orderDetail) {
+                  const mapped = mergeCachedEdits(mapOrderDetailToOrderItem(orderDetail, isNl));
+                  setLiveOrder(mapped);
+                  setOrders((prev) => {
+                    const idx = prev.findIndex((o) => o.nr === mapped.nr);
+                    if (idx >= 0) {
+                      const next = [...prev];
+                      next[idx] = mapped;
+                      return next;
+                    }
+                    return [mapped, ...prev];
+                  });
+                  setCurrentNr(mapped.nr);
+                }
+              })
+              .catch(() => {});
+          }
+        })
+        .finally(() => {
+          if (!isCancelled) setLoadingOrder(false);
+        });
+    } else if (selectedEmailId !== undefined) {
+      setLoadingOrder(true);
+      fetchOrderByEmailId(selectedEmailId)
+        .then((orderDetail) => {
+          if (!isCancelled && orderDetail) {
+            const mapped = mergeCachedEdits(mapOrderDetailToOrderItem(orderDetail, isNl));
+            setLiveOrder(mapped);
+            setOrders((prev) => {
+              const idx = prev.findIndex((o) => o.nr === mapped.nr);
+              if (idx >= 0) {
+                const next = [...prev];
+                next[idx] = mapped;
+                return next;
+              }
+              return [mapped, ...prev];
+            });
+            setCurrentNr(mapped.nr);
+          }
+        })
+        .catch(() => {})
+        .finally(() => {
+          if (!isCancelled) setLoadingOrder(false);
+        });
+    }
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [selectedOrderId, selectedEmailId, selectedOrderNr, isNl]);
+
   const currentOrder = useMemo(() => {
-    return orders.find((o) => o.nr === currentNr) || orders[2] || orders[0];
-  }, [orders, currentNr]);
+    return orders.find((o) => o.nr === currentNr) || liveOrder || orders[2] || orders[0];
+  }, [orders, currentNr, liveOrder]);
 
   // Pending queue list
   const queueList = useMemo(() => {
@@ -296,15 +725,80 @@ export const ValidationView: React.FC<ValidationViewProps> = ({
 
   const hasBlockers = blockers.length > 0;
 
-  // Confirm single line
-  const handleConfirmLine = (lineId: string) => {
+  // Confirm single line and call PATCH API to persist changes to PostgreSQL
+  const handleConfirmLine = async (lineId: string) => {
+    const targetLine = currentOrder.lines.find((l) => l.id === lineId);
+    if (!targetLine) return;
+
+    const orderIdToSave = getOrderIdFromOrder(currentOrder, selectedOrderId);
+    const lineIdToSave = getLineIdFromLine(targetLine, lineId);
+
+    const qtyToSend =
+      targetLine.bonQty !== undefined && targetLine.bonQty !== ''
+        ? targetLine.bonQty.replace(',', '.')
+        : (targetLine.qty !== null && targetLine.qty !== undefined ? String(targetLine.qty) : undefined);
+    const unitToSend = targetLine.unit || resolveProductUnit(targetLine.unit, targetLine.want?.pack || CAT[targetLine.art]?.pack, targetLine.raw, targetLine.art);
+
     const updatedLines = currentOrder.lines.map((l) =>
-      l.id === lineId ? { ...l, confirmed: true, by: userName } : l
+      l.id === lineId ? { ...l, confirmed: true, by: userName, unit: unitToSend } : l
     );
     const updatedOrder = { ...currentOrder, lines: updatedLines };
     const newOrders = orders.map((o) => (o.nr === currentOrder.nr ? updatedOrder : o));
     setOrders(newOrders);
     if (onOrderUpdated) onOrderUpdated(updatedOrder);
+
+    // Save in sessionStorage so page reload preserves state immediately
+    try {
+      sessionStorage.setItem(`order_edits_${currentOrder.nr}`, JSON.stringify(updatedLines));
+    } catch {}
+
+    // Persist confirmation, quantity and unit to backend PostgreSQL
+    if (orderIdToSave && lineIdToSave) {
+      setConfirmingLineId(lineId);
+      try {
+        const savedLine = await updateOrderLine(orderIdToSave, lineIdToSave, {
+          quantity: qtyToSend,
+          unit: unitToSend,
+          product_reference: targetLine.art,
+          product_description: targetLine.raw,
+        });
+
+        toast.success(
+          isNl
+            ? `Regel ${lineIdToSave} opgeslagen in database`
+            : `Line ${lineIdToSave} saved in database`
+        );
+
+        if (savedLine && savedLine.quantity !== undefined && savedLine.quantity !== null) {
+          const freshQtyStr = String(savedLine.quantity);
+          const freshUnit = savedLine.unit || unitToSend;
+          const syncedLines = updatedLines.map((l) =>
+            l.id === lineId
+              ? {
+                  ...l,
+                  bonQty: freshQtyStr,
+                  qty: parseFloat(freshQtyStr) || l.qty,
+                  unit: freshUnit,
+                }
+              : l
+          );
+          const syncedOrder = { ...currentOrder, lines: syncedLines };
+          setOrders((prev) => prev.map((o) => (o.nr === currentOrder.nr ? syncedOrder : o)));
+          try {
+            sessionStorage.setItem(`order_edits_${currentOrder.nr}`, JSON.stringify(syncedLines));
+          } catch {}
+        }
+      } catch (err: any) {
+        console.warn('Failed to save confirmed line to backend:', err);
+        toast.error(
+          isNl
+            ? `Fout bij opslaan in database: ${err.message || 'Onbekende fout'}`
+            : `Failed to save in database: ${err.message || 'Unknown error'}`
+        );
+      } finally {
+        setConfirmingLineId(null);
+      }
+    }
 
     // Advance to next unconfirmed line needing attention
     const nextUnconfirmed = updatedLines.find(
@@ -401,7 +895,7 @@ export const ValidationView: React.FC<ValidationViewProps> = ({
     if (onOrderUpdated) onOrderUpdated(updatedOrder);
   };
 
-  // Update line quantity
+  // Update line quantity in interactive state
   const handleSetQty = (lineId: string, val: string) => {
     const num = parseFloat(val.replace(',', '.'));
     const updatedLines = currentOrder.lines.map((l) =>
@@ -416,16 +910,31 @@ export const ValidationView: React.FC<ValidationViewProps> = ({
     const updatedOrder = { ...currentOrder, lines: updatedLines };
     const newOrders = orders.map((o) => (o.nr === currentOrder.nr ? updatedOrder : o));
     setOrders(newOrders);
+    if (onOrderUpdated) onOrderUpdated(updatedOrder);
+
+    // Save in sessionStorage immediately
+    try {
+      sessionStorage.setItem(`order_edits_${currentOrder.nr}`, JSON.stringify(updatedLines));
+    } catch {}
   };
 
-  // Update line unit
+  // Update line unit in interactive state
   const handleSetUnit = (lineId: string, unitVal: string) => {
+    const targetLine = currentOrder.lines.find((l) => l.id === lineId);
+    if (targetLine && targetLine.art && CAT[targetLine.art]) {
+      CAT[targetLine.art].unit = unitVal;
+    }
     const updatedLines = currentOrder.lines.map((l) =>
       l.id === lineId ? { ...l, unit: unitVal } : l
     );
     const updatedOrder = { ...currentOrder, lines: updatedLines };
     const newOrders = orders.map((o) => (o.nr === currentOrder.nr ? updatedOrder : o));
     setOrders(newOrders);
+    if (onOrderUpdated) onOrderUpdated(updatedOrder);
+
+    try {
+      sessionStorage.setItem(`order_edits_${currentOrder.nr}`, JSON.stringify(updatedLines));
+    } catch {}
   };
 
   // Approve Order
@@ -1139,7 +1648,7 @@ export const ValidationView: React.FC<ValidationViewProps> = ({
           <span>{mbFull}</span>
           <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
             <span style={{ width: '8px', height: '8px', background: '#E8590C', display: 'block' }} />
-            Outlook: {isNl ? 'In review' : 'In review'}
+            Outlook: {(currentOrder as any).outlook_status || (isNl ? 'In review' : 'In review')}
           </span>
         </div>
       </div>
@@ -1850,7 +2359,9 @@ export const ValidationView: React.FC<ValidationViewProps> = ({
                     <span style={{ fontSize: '13px', color: '#6B6B6B', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                       Bon: "{l.raw}" ·{' '}
                       <span style={{ color: l.qty === null ? '#A61B1B' : '#1A1A1A', fontWeight: 600 }}>
-                        {l.qty === null ? (isNl ? 'Hoeveelheid ontbreekt' : 'Quantity missing') : `${l.qty} ${l.unit || 'blik'}`}
+                        {l.qty === null
+                          ? (isNl ? 'Hoeveelheid ontbreekt' : 'Quantity missing')
+                          : `${l.bonQty || l.qty} ${formatUnitLabel(l.unit, isNl)}`}
                       </span>
                     </span>
                   </span>
@@ -2048,7 +2559,7 @@ export const ValidationView: React.FC<ValidationViewProps> = ({
                         <input
                           type="text"
                           inputMode="decimal"
-                          value={l.qty !== null && l.qty !== undefined ? String(l.qty) : ''}
+                          value={l.bonQty !== undefined && l.bonQty !== '' ? l.bonQty : (l.qty !== null && l.qty !== undefined ? String(l.qty) : '')}
                           onChange={(e) => handleSetQty(l.id, e.target.value)}
                           placeholder={isNl ? 'Aanvullen' : 'Fill in'}
                           style={{
@@ -2067,7 +2578,7 @@ export const ValidationView: React.FC<ValidationViewProps> = ({
                       <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '13px', fontWeight: 600, color: '#4D4D4D' }}>
                         {isNl ? 'Eenheid' : 'Unit'}
                         <select
-                          value={l.unit || 'blik'}
+                          value={resolveProductUnit(l.unit, l.want?.pack || CAT[l.art]?.pack, l.raw || catItem.d, l.art)}
                           onChange={(e) => handleSetUnit(l.id, e.target.value)}
                           style={{
                             height: '40px',
@@ -2078,12 +2589,22 @@ export const ValidationView: React.FC<ValidationViewProps> = ({
                             fontWeight: 400,
                             background: '#FFFFFF',
                             minWidth: '96px',
+                            cursor: 'pointer',
                           }}
                         >
                           <option value="blik">{isNl ? 'blik' : 'can'}</option>
                           <option value="emmer">{isNl ? 'emmer' : 'bucket'}</option>
                           <option value="kit">kit</option>
+                          <option value="pot">pot</option>
+                          <option value="vat">{isNl ? 'vat' : 'drum'}</option>
                           <option value="stuk">{isNl ? 'stuk' : 'piece'}</option>
+                          {(() => {
+                            const activeVal = resolveProductUnit(l.unit, l.want?.pack || CAT[l.art]?.pack, l.raw || catItem.d, l.art);
+                            if (activeVal && !['blik', 'emmer', 'kit', 'pot', 'vat', 'stuk'].includes(activeVal)) {
+                              return <option value={activeVal}>{activeVal}</option>;
+                            }
+                            return null;
+                          })()}
                         </select>
                       </label>
 
@@ -2231,7 +2752,7 @@ export const ValidationView: React.FC<ValidationViewProps> = ({
                       {!l.confirmed && (
                         <button
                           onClick={() => handleConfirmLine(l.id)}
-                          disabled={l.qty === null}
+                          disabled={l.qty === null || confirmingLineId === l.id}
                           className="bd"
                           style={{
                             minHeight: '40px',
@@ -2247,13 +2768,16 @@ export const ValidationView: React.FC<ValidationViewProps> = ({
                             textTransform: 'uppercase',
                             letterSpacing: '0.06em',
                             fontSize: '12px',
-                            cursor: l.qty === null ? 'not-allowed' : 'pointer',
+                            cursor: l.qty === null || confirmingLineId === l.id ? 'not-allowed' : 'pointer',
+                            opacity: confirmingLineId === l.id ? 0.7 : 1,
                           }}
                         >
                           <svg className="s" viewBox="0 0 24 24">
                             <path d="M20 6L9 17l-5-5" />
                           </svg>
-                          {isNl ? 'Regel bevestigen' : 'Confirm line'}
+                          {confirmingLineId === l.id
+                            ? (isNl ? 'Opslaan...' : 'Saving...')
+                            : (isNl ? 'Regel bevestigen' : 'Confirm line')}
                         </button>
                       )}
                     </div>

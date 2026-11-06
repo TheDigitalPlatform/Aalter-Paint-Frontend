@@ -16,6 +16,7 @@ import { ProfileView } from '../components/dashboard/ProfileView';
 import { getInitials, fetchMyProfile, getRoleName } from '../lib/profileApi';
 import { getRoleBadgeStyle } from '../lib/roleModuleApi';
 import { getModuleDisplayName, type FrontendModuleId } from '../lib/rbac';
+import { fetchOrders } from '../lib/ordersApi';
 import { User, LogOut, ChevronDown, ChevronUp, Shield } from 'lucide-react';
 import { toast } from 'sonner';
 import { FLOW_TILES, WAITING_ORDERS_DATA, NOTIFICATIONS_DATA } from '../data/mockData';
@@ -89,11 +90,84 @@ export const HomePage: React.FC<HomePageProps> = ({ initialModule = 'overview' }
       return 'AP-26-04819';
     }
   });
+  const [selectedOrderId, setSelectedOrderId] = useState<number | undefined>(() => {
+    try {
+      const val = sessionStorage.getItem('selected_order_id');
+      return val ? parseInt(val, 10) : undefined;
+    } catch {
+      return undefined;
+    }
+  });
+  const [selectedEmailId, setSelectedEmailId] = useState<number | undefined>(() => {
+    try {
+      const val = sessionStorage.getItem('selected_email_id');
+      return val ? parseInt(val, 10) : undefined;
+    } catch {
+      return undefined;
+    }
+  });
   const [notifOpen, setNotifOpen] = useState(false);
   const [userDropdownOpen, setUserDropdownOpen] = useState(false);
   const userDropdownRef = useRef<HTMLDivElement>(null);
   const [notifications] = useState(NOTIFICATIONS_DATA);
   const [notifRead, setNotifRead] = useState(false);
+  const [ordersCount, setOrdersCount] = useState<number>(() => {
+    try {
+      const cached = sessionStorage.getItem('live_orders_total');
+      return cached ? parseInt(cached, 10) : 13;
+    } catch {
+      return 13;
+    }
+  });
+
+  // Dynamically load live order count for the sidebar badge and auto-refresh on updates
+  useEffect(() => {
+    let isCancelled = false;
+
+    const loadLiveOrdersCount = async () => {
+      try {
+        const data = await fetchOrders({ limit: 1 });
+        if (!isCancelled && data) {
+          const liveTotal = data.insights?.total_orders ?? data.total;
+          if (typeof liveTotal === 'number') {
+            setOrdersCount(liveTotal);
+            try {
+              sessionStorage.setItem('live_orders_total', String(liveTotal));
+            } catch {}
+          }
+        }
+      } catch {
+        // Keep previous count if unauthenticated or network failure
+      }
+    };
+
+    loadLiveOrdersCount();
+
+    // Auto-refresh periodically to reflect newly incoming orders
+    const intervalId = setInterval(loadLiveOrdersCount, 10000);
+
+    // Immediate reactive update whenever OrdersView fetches orders
+    const handleOrdersCountEvent = (e: Event) => {
+      const customEvt = e as CustomEvent<number>;
+      if (typeof customEvt.detail === 'number') {
+        setOrdersCount(customEvt.detail);
+        try {
+          sessionStorage.setItem('live_orders_total', String(customEvt.detail));
+        } catch {}
+      }
+    };
+
+    window.addEventListener('orders_count_updated', handleOrdersCountEvent);
+    window.addEventListener('focus', loadLiveOrdersCount);
+
+    return () => {
+      isCancelled = true;
+      clearInterval(intervalId);
+      window.removeEventListener('orders_count_updated', handleOrdersCountEvent);
+      window.removeEventListener('focus', loadLiveOrdersCount);
+    };
+  }, []);
+
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(() => {
     try {
       return localStorage.getItem('sidebar_collapsed') === 'true';
@@ -151,7 +225,7 @@ export const HomePage: React.FC<HomePageProps> = ({ initialModule = 'overview' }
       id: 'orders',
       labelNl: 'Orders',
       labelEn: 'Orders',
-      badge: 13,
+      badge: ordersCount,
       badgeBg: '#F1F5F9',
       badgeColor: '#334155',
       badgeBorder: '1px solid #E2E8F0',
@@ -377,7 +451,7 @@ export const HomePage: React.FC<HomePageProps> = ({ initialModule = 'overview' }
     setActiveModule(mod);
   }, [location.pathname, initialModule]);
 
-  const handleNav = (mod: ActiveModule, orderNr?: string) => {
+  const handleNav = (mod: ActiveModule, orderNr?: string, orderId?: number, emailId?: number) => {
     if (mod !== 'profile' && !hasPermission(mod)) {
       toast.error(
         language === 'NL'
@@ -390,6 +464,18 @@ export const HomePage: React.FC<HomePageProps> = ({ initialModule = 'overview' }
       setSelectedOrderNr(orderNr);
       try {
         sessionStorage.setItem('selected_order_nr', orderNr);
+      } catch { }
+    }
+    if (orderId !== undefined) {
+      setSelectedOrderId(orderId);
+      try {
+        sessionStorage.setItem('selected_order_id', String(orderId));
+      } catch { }
+    }
+    if (emailId !== undefined) {
+      setSelectedEmailId(emailId);
+      try {
+        sessionStorage.setItem('selected_email_id', String(emailId));
       } catch { }
     }
     setActiveModule(mod);
@@ -1117,13 +1203,15 @@ export const HomePage: React.FC<HomePageProps> = ({ initialModule = 'overview' }
           ) : activeModule === 'orders' ? (
             <OrdersView
               language={language}
-              onOpenOrder={(nr) => handleNav('validation', nr)}
+              onOpenOrder={(nr, orderId, emailId) => handleNav('validation', nr, orderId, emailId)}
               onNavigateToExceptions={() => handleNav('exceptions')}
             />
           ) : activeModule === 'validation' ? (
             <ValidationView
               language={language}
               selectedOrderNr={selectedOrderNr}
+              selectedOrderId={selectedOrderId}
+              selectedEmailId={selectedEmailId}
               userName={userName}
               onNavigateToOrders={() => handleNav('orders')}
               onNavigateToExceptions={() => handleNav('exceptions')}
