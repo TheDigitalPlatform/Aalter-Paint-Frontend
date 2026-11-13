@@ -33,6 +33,7 @@ export interface OrderListResponseData {
   skip: number;
   limit: number;
   insights: OrderInsightsSummary;
+  available_mailboxes?: string[];
 }
 
 export interface FetchOrdersParams {
@@ -208,4 +209,22 @@ export async function updateOrderLine(
 
   return json.data;
 }
+
+export async function fetchAvailableMailboxes(): Promise<string[]> {
+  try {
+    const baseUrl = getApiBaseUrl();
+    const response = await fetch(`${baseUrl}/orders/mailboxes`, {
+      method: 'GET',
+      headers: getAuthHeaders(),
+    });
+    if (!response.ok) return [];
+    const json = await response.json();
+    if (Array.isArray(json)) return json;
+    if (json && Array.isArray(json.data)) return json.data;
+    return [];
+  } catch {
+    return [];
+  }
+}
+
 

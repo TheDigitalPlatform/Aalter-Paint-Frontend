@@ -3,16 +3,26 @@ import { ConfidenceBadge } from '../common/ConfidenceBadge';
 import { type Language } from '../common/LanguageToggle';
 import { useLanguage } from '../../context/LanguageContext';
 import { INITIAL_ORDERS, type OrderItem } from '../../data/mockData';
-import { fetchOrders, type OrderListItem, type OrderInsightsSummary } from '../../lib/ordersApi';
+import { fetchOrders, fetchAvailableMailboxes, type OrderListItem, type OrderInsightsSummary } from '../../lib/ordersApi';
 
-interface OrdersViewProps {
+export interface OrdersViewProps {
   language?: Language;
   onOpenOrder?: (orderNr: string, orderId?: number, emailId?: number) => void;
   onNavigateToExceptions?: () => void;
+  mode?: 'orders' | 'validation';
 }
 
 type SortKey = 'nr' | 'klant' | 'received' | 'conf';
 type SortDir = 'asc' | 'desc';
+
+function formatMailboxOptionLabel(mailbox: string, isNl: boolean): string {
+  const clean = mailbox.trim();
+  const lower = clean.toLowerCase();
+  if (lower === 'info') return 'info@';
+  if (lower === 'bestel') return 'bestel@';
+  if (lower === 'persoonlijk' || lower === 'personal') return isNl ? 'Persoonlijk' : 'Personal';
+  return clean;
+}
 
 function mapApiOrderToOrderItem(apiOrder: OrderListItem, isNl: boolean): OrderItem {
   let day = '';
@@ -95,6 +105,7 @@ function mapApiOrderToOrderItem(apiOrder: OrderListItem, isNl: boolean): OrderIt
     apiConfidenceSummary: apiOrder.confidence_summary,
     apiOutlookStatus: apiOrder.outlook_status,
     rawReceivedAt: apiOrder.received_at || apiOrder.created_at,
+    rawMailbox: apiOrder.mailbox || undefined,
     order_id: apiOrder.order_id,
     email_id: apiOrder.email_id,
     ...(apiOrder.confidence_summary ? { confWhy: apiOrder.confidence_summary } : {}),
@@ -105,6 +116,7 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
   language,
   onOpenOrder,
   onNavigateToExceptions,
+  mode = 'orders',
 }) => {
   const { language: ctxLang } = useLanguage();
   const activeLang = language || ctxLang || 'NL';
@@ -121,58 +133,143 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
 
   // Live API State
   const [liveOrders, setLiveOrders] = useState<OrderListItem[] | null>(null);
+  const [liveMailboxes, setLiveMailboxes] = useState<string[]>([]);
   const [insightsSummary, setInsightsSummary] = useState<OrderInsightsSummary | null>(null);
   const [loading, setLoading] = useState<boolean>(false);
 
   const threshold = 70;
 
-  // Fetch orders from GET /api/orders
+  // Fetch distinct live mailboxes on mount
   useEffect(() => {
     let isCancelled = false;
-    setLoading(true);
-
-    fetchOrders({
-      search: search.trim() || undefined,
-      status: fStatus !== 'alle' ? fStatus : undefined,
-      mailbox: fMailbox !== 'alle' ? fMailbox : undefined,
-      extra_attention: fAttention ? true : undefined,
-      waiting_longer_than_4_hours: fLong ? true : undefined,
-      uncertain_only: fUncertain ? true : undefined,
-    })
-      .then((data) => {
-        console.log('[OrdersView] Live GET /api/orders data received:', data);
-        if (!isCancelled) {
-          setLiveOrders(data.items || []);
-          setInsightsSummary(data.insights);
-          const liveTotal = data.insights?.total_orders ?? (
-            (!fAttention && !fLong && !fUncertain && !search.trim() && fStatus === 'alle' && fMailbox === 'alle')
-              ? data.total
-              : undefined
-          );
-          if (typeof liveTotal === 'number') {
-            window.dispatchEvent(new CustomEvent('orders_count_updated', { detail: liveTotal }));
-          }
-        }
-      })
-      .catch((err) => {
-        console.error('[OrdersView] GET /api/orders request failed:', err);
-      })
-      .finally(() => {
-        if (!isCancelled) setLoading(false);
-      });
-
+    fetchAvailableMailboxes().then((mbs) => {
+      if (!isCancelled && Array.isArray(mbs) && mbs.length > 0) {
+        setLiveMailboxes((prev) => Array.from(new Set([...prev, ...mbs])));
+      }
+    }).catch(() => {});
     return () => {
       isCancelled = true;
     };
-  }, [search, fStatus, fMailbox, fAttention, fLong, fUncertain]);
+  }, []);
+
+  // Fetch orders from GET /api/orders with live polling and reactive refresh
+  useEffect(() => {
+    let isCancelled = false;
+
+    const statusParam =
+      mode === 'validation'
+        ? (fStatus !== 'alle' ? fStatus : 'validation')
+        : (fStatus !== 'alle' ? fStatus : undefined);
+
+    const loadOrders = (isBackground: boolean = false) => {
+      if (!isBackground) setLoading(true);
+
+      fetchOrders({
+        search: search.trim() || undefined,
+        status: statusParam,
+        mailbox: fMailbox !== 'alle' ? fMailbox : undefined,
+        extra_attention: fAttention ? true : undefined,
+        waiting_longer_than_4_hours: fLong ? true : undefined,
+        uncertain_only: fUncertain ? true : undefined,
+      })
+        .then((data) => {
+          console.log(`[OrdersView (${mode})] Live GET /api/orders data received:`, data);
+          if (!isCancelled) {
+            setLiveOrders(data.items || []);
+            setInsightsSummary(data.insights);
+            if (data.available_mailboxes && data.available_mailboxes.length > 0) {
+              setLiveMailboxes((prev) => Array.from(new Set([...prev, ...data.available_mailboxes!])));
+            }
+            const liveTotal = data.insights?.total_orders ?? (
+              (!fAttention && !fLong && !fUncertain && !search.trim() && fStatus === 'alle' && fMailbox === 'alle')
+                ? data.total
+                : undefined
+            );
+            if (typeof liveTotal === 'number') {
+              if (mode === 'validation') {
+                window.dispatchEvent(new CustomEvent('validation_count_updated', { detail: liveTotal }));
+              } else {
+                window.dispatchEvent(new CustomEvent('orders_count_updated', { detail: liveTotal }));
+              }
+            }
+          }
+        })
+        .catch((err) => {
+          console.error(`[OrdersView (${mode})] GET /api/orders request failed:`, err);
+        })
+        .finally(() => {
+          if (!isCancelled && !isBackground) setLoading(false);
+        });
+    };
+
+    loadOrders(false);
+
+    // Auto-refresh periodically to automatically pick up newly incoming live orders
+    const intervalId = setInterval(() => loadOrders(true), 10000);
+
+    const handleFocus = () => loadOrders(true);
+    const handleRefresh = () => loadOrders(true);
+
+    window.addEventListener('focus', handleFocus);
+    window.addEventListener('orders_refreshed', handleRefresh);
+
+    return () => {
+      isCancelled = true;
+      clearInterval(intervalId);
+      window.removeEventListener('focus', handleFocus);
+      window.removeEventListener('orders_refreshed', handleRefresh);
+    };
+  }, [search, fStatus, fMailbox, fAttention, fLong, fUncertain, mode]);
+
+  // Dynamically derive available mailbox list from live backend data and incoming orders
+  const availableMailboxOptions = useMemo(() => {
+    const set = new Set<string>();
+
+    // 1. Add mailboxes returned from backend /mailboxes or /orders available_mailboxes
+    liveMailboxes.forEach((m) => {
+      if (m && m.trim()) set.add(m.trim());
+    });
+
+    // 2. Add mailboxes found in any currently loaded live orders
+    if (liveOrders) {
+      liveOrders.forEach((o) => {
+        if (o.mailbox && o.mailbox.trim()) set.add(o.mailbox.trim());
+      });
+    }
+
+    // 3. Fallback: if no live mailboxes found yet, keep initial options so filter is available
+    if (set.size === 0) {
+      INITIAL_ORDERS.forEach((o) => {
+        if (o.mb) set.add(o.mb);
+      });
+    }
+
+    return Array.from(set);
+  }, [liveMailboxes, liveOrders]);
 
   // Determine source data (uses live API data once loaded, even if 0 items)
   const sourceOrders = useMemo(() => {
-    if (liveOrders !== null) {
-      return liveOrders.map((apiOrder) => mapApiOrderToOrderItem(apiOrder, isNl));
+    let orders = liveOrders !== null
+      ? liveOrders.map((apiOrder) => mapApiOrderToOrderItem(apiOrder, isNl))
+      : INITIAL_ORDERS;
+
+    if (mode === 'validation') {
+      orders = orders.filter((o) => {
+        const stLower = (o.st || '').toLowerCase();
+        return (
+          stLower === 'aandacht' ||
+          stLower === 'klaar' ||
+          stLower === 'needs_attention' ||
+          stLower === 'needs_review' ||
+          stLower === 'ready_for_review' ||
+          stLower === 'completed' ||
+          stLower === 'pending'
+        );
+      });
     }
-    return INITIAL_ORDERS;
-  }, [liveOrders, isNl]);
+
+    return orders;
+  }, [liveOrders, isNl, mode]);
 
   // Process order views
   const processedOrders = useMemo(() => {
@@ -277,10 +374,16 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
           stLabel = st;
       }
 
-      // Mailbox label
+      // Mailbox label from live data
+      const rawMb = (o as any).rawMailbox || (o as any).mailbox;
       let mbLabel = 'info@';
-      if (o.mb === 'bestel') mbLabel = 'bestel@';
-      if (o.mb === 'persoonlijk') mbLabel = isNl ? 'Persoonlijk' : 'Personal';
+      if (rawMb) {
+        mbLabel = formatMailboxOptionLabel(rawMb, isNl);
+      } else {
+        if (o.mb === 'bestel') mbLabel = 'bestel@';
+        else if (o.mb === 'persoonlijk') mbLabel = isNl ? 'Persoonlijk' : 'Personal';
+        else mbLabel = 'info@';
+      }
 
       // Under threshold text
       let underTxt = (o as any).apiConfidenceSummary;
@@ -340,6 +443,14 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
         !q ||
         (String(o.nr || '') + ' ' + String(o.klant || '') + ' ' + String(o.ref || '')).toLowerCase().indexOf(q) >= 0;
 
+      // In validation mode, restrict strictly to validation categories (Needs Attention and Ready for Review)
+      if (mode === 'validation') {
+        const isValidationCategory = o.st === 'aandacht' || o.st === 'klaar';
+        if (!isValidationCategory) return false;
+        if (fStatus === 'klaar' && o.st !== 'klaar') return false;
+        if (fStatus === 'aandacht' && o.st !== 'aandacht') return false;
+      }
+
       // When live API is active, the backend handles server-side filtering
       if (liveOrders !== null) {
         if (fUncertain) {
@@ -354,7 +465,10 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
         fStatus === 'alle' ||
         (fStatus === 'open' ? o.isPending : o.st === fStatus);
 
-      const matchMailbox = fMailbox === 'alle' || o.mb === fMailbox;
+      const matchMailbox =
+        fMailbox === 'alle' ||
+        o.mb === fMailbox ||
+        (Boolean((o as any).rawMailbox) && (o as any).rawMailbox.toLowerCase().includes(fMailbox.toLowerCase()));
       const matchAttention = !fAttention || o.st === 'aandacht';
       const matchLong = !fLong || o.isLongOrder;
       const matchUncertain = !fUncertain || (o.st === 'aandacht' && o.avg !== null && o.avg <= 70);
@@ -368,7 +482,7 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
         matchUncertain
       );
     });
-  }, [processedOrders, search, fStatus, fMailbox, fAttention, fLong, fUncertain, liveOrders]);
+  }, [processedOrders, search, fStatus, fMailbox, fAttention, fLong, fUncertain, liveOrders, mode]);
 
   // Sorted rows
   const sortedRows = useMemo(() => {
@@ -515,12 +629,16 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
             color: '#1A1A1A',
           }}
         >
-          Orders
+          {mode === 'validation' ? (isNl ? 'Validatie' : 'Validation') : 'Orders'}
         </h1>
         <p style={{ margin: 0, color: '#4D4D4D' }}>
-          {isNl
-            ? 'Alle bestelmails uit info@, bestel@ en de persoonlijke mailbox, automatisch gelezen en gekoppeld. Klik een order om te valideren.'
-            : 'All order emails from info@, bestel@ and the personal mailbox, automatically read and linked. Click an order to validate.'}
+          {mode === 'validation'
+            ? (isNl
+                ? 'Bestellingen die aandacht vereisen of klaar zijn voor controle. Klik een order om te valideren.'
+                : 'Orders that need attention or are ready for review. Click an order to validate.')
+            : (isNl
+                ? 'Alle bestelmails uit info@, bestel@ en de persoonlijke mailbox, automatisch gelezen en gekoppeld. Klik een order om te valideren.'
+                : 'All order emails from info@, bestel@ and the personal mailbox, automatically read and linked. Click an order to validate.')}
         </p>
       </div>
 
@@ -621,199 +739,231 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
       <div
         style={{
           display: 'flex',
-          flexWrap: 'wrap',
-          alignItems: 'flex-end',
-          gap: '12px',
+          flexDirection: 'column',
+          gap: '14px',
           padding: '14px 16px',
           background: '#FFFFFF',
           border: '1px solid #DADADA',
           borderRadius: 0,
         }}
       >
-        {/* Search */}
-        <label
+        {/* Top Controls Row */}
+        <div
           style={{
             display: 'flex',
-            flexDirection: 'column',
-            gap: '4px',
-            flex: '1 1 240px',
-            fontSize: '13px',
-            fontWeight: 600,
+            flexWrap: 'wrap',
+            alignItems: 'flex-end',
+            gap: '12px',
           }}
         >
-          {isNl ? 'Zoeken' : 'Search'}
-          <span
+          {/* Search */}
+          <label
+            style={{
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '4px',
+              width: '240px',
+              maxWidth: '240px',
+              flex: '0 0 240px',
+              fontSize: '13px',
+              fontWeight: 600,
+            }}
+          >
+            {isNl ? 'Zoeken' : 'To search'}
+            <span
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                height: '44px',
+                padding: '0 12px',
+                border: '1px solid #C9C9C9',
+                background: '#FFFFFF',
+                borderRadius: 0,
+              }}
+            >
+              <svg className="i" viewBox="0 0 24 24">
+                <circle cx="11" cy="11" r="7" />
+                <path d="M21 21l-4.35-4.35" />
+              </svg>
+              <input
+                type="search"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder={
+                  isNl
+                    ? 'Ordernummer, klant of referentie'
+                    : 'Order number, customer or reference'
+                }
+                style={{
+                  border: 0,
+                  outline: 'none',
+                  flexGrow: 1,
+                  minWidth: 0,
+                  fontSize: '15px',
+                  fontWeight: 400,
+                  background: 'transparent',
+                }}
+              />
+            </span>
+          </label>
+
+          {/* Status */}
+          <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '13px', fontWeight: 600 }}>
+            Status
+            <select
+              value={fStatus}
+              onChange={(e) => {
+                setFStatus(e.target.value);
+                setFUncertain(false);
+              }}
+              style={{
+                height: '44px',
+                padding: '0 10px',
+                border: '1px solid #C9C9C9',
+                background: '#FFFFFF',
+                fontSize: '15px',
+                fontWeight: 400,
+                minWidth: '190px',
+                borderRadius: 0,
+              }}
+            >
+              <option value="alle">{isNl ? 'Alle statussen' : 'All statuses'}</option>
+              {mode === 'validation' ? (
+                <>
+                  <option value="klaar">{isNl ? 'Klaar voor controle' : 'Ready for review'}</option>
+                  <option value="aandacht">{isNl ? 'Aandacht nodig' : 'Needs attention'}</option>
+                </>
+              ) : (
+                <>
+                  <option value="open">{isNl ? 'Wacht op controle' : 'Awaiting review'}</option>
+                  <option value="verwerking">{isNl ? 'In behandeling' : 'Processing'}</option>
+                  <option value="klaar">{isNl ? 'Klaar voor controle' : 'Ready for review'}</option>
+                  <option value="aandacht">{isNl ? 'Aandacht nodig' : 'Needs attention'}</option>
+                  <option value="goedgekeurd">{isNl ? 'Goedgekeurd' : 'Approved'}</option>
+                  <option value="afgewezen">{isNl ? 'Afgewezen' : 'Rejected'}</option>
+                  <option value="gesync">{isNl ? 'Gesynchroniseerd' : 'Synchronized'}</option>
+                  <option value="syncfout">{isNl ? 'Sync mislukt' : 'Sync failed'}</option>
+                </>
+              )}
+            </select>
+          </label>
+
+          {/* Mailbox */}
+          <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '13px', fontWeight: 600 }}>
+            Mailbox
+            <select
+              value={fMailbox}
+              onChange={(e) => setFMailbox(e.target.value)}
+              style={{
+                height: '44px',
+                padding: '0 10px',
+                border: '1px solid #C9C9C9',
+                background: '#FFFFFF',
+                fontSize: '15px',
+                fontWeight: 400,
+                minWidth: '160px',
+                borderRadius: 0,
+              }}
+            >
+              <option value="alle">{isNl ? 'Alle mailboxen' : 'All mailboxes'}</option>
+              {availableMailboxOptions.map((mb) => (
+                <option key={mb} value={mb}>
+                  {formatMailboxOptionLabel(mb, isNl)}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          {/* Only extra attention */}
+          <label
             style={{
               display: 'flex',
               alignItems: 'center',
               gap: '8px',
               height: '44px',
-              padding: '0 12px',
-              border: '1px solid #C9C9C9',
-              background: '#FFFFFF',
-              borderRadius: 0,
+              fontSize: '14px',
+              fontWeight: 600,
+              cursor: 'pointer',
             }}
           >
-            <svg className="i" viewBox="0 0 24 24">
-              <circle cx="11" cy="11" r="7" />
-              <path d="M21 21l-4.35-4.35" />
-            </svg>
             <input
-              type="search"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder={
-                isNl
-                  ? 'Ordernummer, klant of referentie'
-                  : 'Order number, customer or reference'
-              }
-              style={{
-                border: 0,
-                outline: 'none',
-                flexGrow: 1,
-                minWidth: 0,
-                fontSize: '15px',
-                fontWeight: 400,
-                background: 'transparent',
+              type="checkbox"
+              checked={fAttention}
+              onChange={(e) => {
+                setFAttention(e.target.checked);
+                if (!e.target.checked) {
+                  setFUncertain(false);
+                }
               }}
+              style={{ width: '18px', height: '18px', accentColor: '#E20714' }}
             />
+            {isNl ? 'Enkel extra aandacht' : 'Just extra attention'}
+          </label>
+
+          {/* Wait > 4 hours */}
+          <label
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+              height: '44px',
+              fontSize: '14px',
+              fontWeight: 600,
+              cursor: 'pointer',
+            }}
+          >
+            <input
+              type="checkbox"
+              checked={fLong}
+              onChange={(e) => {
+                setFLong(e.target.checked);
+                if (e.target.checked) {
+                  setFUncertain(false);
+                }
+              }}
+              style={{ width: '18px', height: '18px', accentColor: '#E20714' }}
+            />
+            {isNl ? 'Wacht langer dan 4 uur' : 'Wait longer than 4 hours'}
+          </label>
+        </div>
+
+        {/* Bottom Actions Row: Clear filters on left, count indicator on right */}
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: '12px',
+          }}
+        >
+          {/* Reset button */}
+          <button
+            className="bg"
+            onClick={handleResetFilters}
+            style={{
+              height: '44px',
+              padding: '0 14px',
+              border: '1px solid #C9C9C9',
+              background: '#FFFFFF',
+              borderRadius: 0,
+              fontWeight: 700,
+              textTransform: 'uppercase',
+              letterSpacing: '0.06em',
+              fontSize: '13px',
+              cursor: 'pointer',
+            }}
+          >
+            {isNl ? 'Wis filters' : 'Clear filters'}
+          </button>
+
+          {/* Count indicator */}
+          <span style={{ fontSize: '13px', color: '#4D4D4D' }}>
+            {isNl
+              ? `${sortedRows.length} van ${processedOrders.length} orders`
+              : `${sortedRows.length} of ${processedOrders.length} orders`}
           </span>
-        </label>
-
-        {/* Status */}
-        <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '13px', fontWeight: 600 }}>
-          Status
-          <select
-            value={fStatus}
-            onChange={(e) => {
-              setFStatus(e.target.value);
-              setFUncertain(false);
-            }}
-            style={{
-              height: '44px',
-              padding: '0 10px',
-              border: '1px solid #C9C9C9',
-              background: '#FFFFFF',
-              fontSize: '15px',
-              fontWeight: 400,
-              minWidth: '190px',
-              borderRadius: 0,
-            }}
-          >
-            <option value="alle">{isNl ? 'Alle statussen' : 'All statuses'}</option>
-            <option value="open">{isNl ? 'Wacht op controle' : 'Awaiting review'}</option>
-            <option value="verwerking">{isNl ? 'In behandeling' : 'Processing'}</option>
-            <option value="klaar">{isNl ? 'Klaar voor controle' : 'Ready for review'}</option>
-            <option value="aandacht">{isNl ? 'Aandacht nodig' : 'Needs attention'}</option>
-            <option value="goedgekeurd">{isNl ? 'Goedgekeurd' : 'Approved'}</option>
-            <option value="afgewezen">{isNl ? 'Afgewezen' : 'Rejected'}</option>
-            <option value="gesync">{isNl ? 'Gesynchroniseerd' : 'Synchronized'}</option>
-            <option value="syncfout">{isNl ? 'Sync mislukt' : 'Sync failed'}</option>
-          </select>
-        </label>
-
-        {/* Mailbox */}
-        <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '13px', fontWeight: 600 }}>
-          Mailbox
-          <select
-            value={fMailbox}
-            onChange={(e) => setFMailbox(e.target.value)}
-            style={{
-              height: '44px',
-              padding: '0 10px',
-              border: '1px solid #C9C9C9',
-              background: '#FFFFFF',
-              fontSize: '15px',
-              fontWeight: 400,
-              minWidth: '160px',
-              borderRadius: 0,
-            }}
-          >
-            <option value="alle">{isNl ? 'Alle mailboxen' : 'All mailboxes'}</option>
-            <option value="info">info@</option>
-            <option value="bestel">bestel@</option>
-            <option value="persoonlijk">{isNl ? 'Persoonlijk' : 'Personal'}</option>
-          </select>
-        </label>
-
-        {/* Only extra attention */}
-        <label
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '8px',
-            height: '44px',
-            fontSize: '14px',
-            fontWeight: 600,
-            cursor: 'pointer',
-          }}
-        >
-          <input
-            type="checkbox"
-            checked={fAttention}
-            onChange={(e) => {
-              setFAttention(e.target.checked);
-              if (!e.target.checked) {
-                setFUncertain(false);
-              }
-            }}
-            style={{ width: '18px', height: '18px', accentColor: '#E20714' }}
-          />
-          {isNl ? 'Enkel extra aandacht' : 'Only extra attention'}
-        </label>
-
-        {/* Wait > 4 hours */}
-        <label
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '8px',
-            height: '44px',
-            fontSize: '14px',
-            fontWeight: 600,
-            cursor: 'pointer',
-          }}
-        >
-          <input
-            type="checkbox"
-            checked={fLong}
-            onChange={(e) => {
-              setFLong(e.target.checked);
-              if (e.target.checked) {
-                setFUncertain(false);
-              }
-            }}
-            style={{ width: '18px', height: '18px', accentColor: '#E20714' }}
-          />
-          {isNl ? 'Wacht langer dan 4 uur' : 'Waiting longer than 4 hours'}
-        </label>
-
-        {/* Reset button */}
-        <button
-          className="bg"
-          onClick={handleResetFilters}
-          style={{
-            height: '44px',
-            padding: '0 14px',
-            border: '1px solid #C9C9C9',
-            background: '#FFFFFF',
-            borderRadius: 0,
-            fontWeight: 700,
-            textTransform: 'uppercase',
-            letterSpacing: '0.06em',
-            fontSize: '13px',
-            cursor: 'pointer',
-          }}
-        >
-          {isNl ? 'Wis filters' : 'Clear filters'}
-        </button>
-
-        {/* Count indicator */}
-        <span style={{ fontSize: '13px', color: '#4D4D4D', marginLeft: 'auto', alignSelf: 'center' }}>
-          {isNl
-            ? `${sortedRows.length} van ${processedOrders.length} orders`
-            : `${sortedRows.length} of ${processedOrders.length} orders`}
-        </span>
+        </div>
       </div>
 
       {/* Table */}

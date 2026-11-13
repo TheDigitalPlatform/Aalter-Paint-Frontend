@@ -22,6 +22,7 @@ interface ValidationViewProps {
   onNavigateToOrders?: () => void;
   onNavigateToExceptions?: () => void;
   onOrderUpdated?: (order: OrderItem) => void;
+  backLabel?: string;
 }
 
 export function resolveProductUnit(
@@ -337,6 +338,7 @@ export const ValidationView: React.FC<ValidationViewProps> = ({
   onNavigateToOrders,
   onNavigateToExceptions,
   onOrderUpdated,
+  backLabel,
 }) => {
   const { language: ctxLang } = useLanguage();
   const activeLang = language || ctxLang || 'NL';
@@ -952,6 +954,7 @@ export const ValidationView: React.FC<ValidationViewProps> = ({
     const newOrders = orders.map((o) => (o.nr === currentOrder.nr ? updatedOrder : o));
     setOrders(newOrders);
     if (onOrderUpdated) onOrderUpdated(updatedOrder);
+    window.dispatchEvent(new CustomEvent('orders_refreshed'));
 
     // Simulate BC sync completion after 1.8s
     setTimeout(() => {
@@ -980,6 +983,7 @@ export const ValidationView: React.FC<ValidationViewProps> = ({
           : `Sales order ${voNumber} created in Business Central`
       );
       if (onOrderUpdated) onOrderUpdated(syncedOrder);
+      window.dispatchEvent(new CustomEvent('orders_refreshed'));
     }, 1800);
   };
 
@@ -1010,6 +1014,7 @@ export const ValidationView: React.FC<ValidationViewProps> = ({
         : `Order ${currentOrder.nr} rejected`
     );
     if (onOrderUpdated) onOrderUpdated(updatedOrder);
+    window.dispatchEvent(new CustomEvent('orders_refreshed'));
   };
 
   // Queue navigation
@@ -1166,7 +1171,7 @@ export const ValidationView: React.FC<ValidationViewProps> = ({
             <svg className="s" viewBox="0 0 24 24">
               <path d="M15 18l-6-6 6-6" />
             </svg>
-            Orders
+            {backLabel || (isNl ? 'Validatie' : 'Validation')}
           </button>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>

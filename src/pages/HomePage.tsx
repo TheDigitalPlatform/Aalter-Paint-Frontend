@@ -120,11 +120,22 @@ export const HomePage: React.FC<HomePageProps> = ({ initialModule = 'overview' }
     }
   });
 
-  // Dynamically load live order count for the sidebar badge and auto-refresh on updates
+  const [validationCount, setValidationCount] = useState<number>(() => {
+    try {
+      const cached = sessionStorage.getItem('live_validation_total');
+      return cached ? parseInt(cached, 10) : 6;
+    } catch {
+      return 6;
+    }
+  });
+
+  const [viewingValidationDetail, setViewingValidationDetail] = useState<boolean>(false);
+
+  // Dynamically load live order & validation counts for the sidebar badge and auto-refresh on updates
   useEffect(() => {
     let isCancelled = false;
 
-    const loadLiveOrdersCount = async () => {
+    const loadLiveCounts = async () => {
       try {
         const data = await fetchOrders({ limit: 1 });
         if (!isCancelled && data) {
@@ -139,12 +150,27 @@ export const HomePage: React.FC<HomePageProps> = ({ initialModule = 'overview' }
       } catch {
         // Keep previous count if unauthenticated or network failure
       }
+
+      try {
+        const valData = await fetchOrders({ status: 'validation', limit: 1 });
+        if (!isCancelled && valData) {
+          const liveValTotal = valData.total;
+          if (typeof liveValTotal === 'number') {
+            setValidationCount(liveValTotal);
+            try {
+              sessionStorage.setItem('live_validation_total', String(liveValTotal));
+            } catch {}
+          }
+        }
+      } catch {
+        // Keep previous count if unauthenticated or network failure
+      }
     };
 
-    loadLiveOrdersCount();
+    loadLiveCounts();
 
     // Auto-refresh periodically to reflect newly incoming orders
-    const intervalId = setInterval(loadLiveOrdersCount, 10000);
+    const intervalId = setInterval(loadLiveCounts, 10000);
 
     // Immediate reactive update whenever OrdersView fetches orders
     const handleOrdersCountEvent = (e: Event) => {
@@ -157,14 +183,26 @@ export const HomePage: React.FC<HomePageProps> = ({ initialModule = 'overview' }
       }
     };
 
+    const handleValidationCountEvent = (e: Event) => {
+      const customEvt = e as CustomEvent<number>;
+      if (typeof customEvt.detail === 'number') {
+        setValidationCount(customEvt.detail);
+        try {
+          sessionStorage.setItem('live_validation_total', String(customEvt.detail));
+        } catch {}
+      }
+    };
+
     window.addEventListener('orders_count_updated', handleOrdersCountEvent);
-    window.addEventListener('focus', loadLiveOrdersCount);
+    window.addEventListener('validation_count_updated', handleValidationCountEvent);
+    window.addEventListener('focus', loadLiveCounts);
 
     return () => {
       isCancelled = true;
       clearInterval(intervalId);
       window.removeEventListener('orders_count_updated', handleOrdersCountEvent);
-      window.removeEventListener('focus', loadLiveOrdersCount);
+      window.removeEventListener('validation_count_updated', handleValidationCountEvent);
+      window.removeEventListener('focus', loadLiveCounts);
     };
   }, []);
 
@@ -239,7 +277,7 @@ export const HomePage: React.FC<HomePageProps> = ({ initialModule = 'overview' }
       id: 'validation',
       labelNl: 'Validatie',
       labelEn: 'Validation',
-      badge: 6,
+      badge: validationCount,
       badgeBg: '#E20714',
       badgeColor: '#FFFFFF',
       icon: (active) => (
@@ -449,6 +487,9 @@ export const HomePage: React.FC<HomePageProps> = ({ initialModule = 'overview' }
   useEffect(() => {
     const mod = getModuleFromPath(location.pathname);
     setActiveModule(mod);
+    if (mod !== 'validation') {
+      setViewingValidationDetail(false);
+    }
   }, [location.pathname, initialModule]);
 
   const handleNav = (mod: ActiveModule, orderNr?: string, orderId?: number, emailId?: number) => {
@@ -465,6 +506,13 @@ export const HomePage: React.FC<HomePageProps> = ({ initialModule = 'overview' }
       try {
         sessionStorage.setItem('selected_order_nr', orderNr);
       } catch { }
+      if (mod === 'validation') {
+        setViewingValidationDetail(true);
+      } else {
+        setViewingValidationDetail(false);
+      }
+    } else {
+      setViewingValidationDetail(false);
     }
     if (orderId !== undefined) {
       setSelectedOrderId(orderId);
@@ -1207,15 +1255,34 @@ export const HomePage: React.FC<HomePageProps> = ({ initialModule = 'overview' }
               onNavigateToExceptions={() => handleNav('exceptions')}
             />
           ) : activeModule === 'validation' ? (
-            <ValidationView
-              language={language}
-              selectedOrderNr={selectedOrderNr}
-              selectedOrderId={selectedOrderId}
-              selectedEmailId={selectedEmailId}
-              userName={userName}
-              onNavigateToOrders={() => handleNav('orders')}
-              onNavigateToExceptions={() => handleNav('exceptions')}
-            />
+            viewingValidationDetail ? (
+              <ValidationView
+                language={language}
+                selectedOrderNr={selectedOrderNr}
+                selectedOrderId={selectedOrderId}
+                selectedEmailId={selectedEmailId}
+                userName={userName}
+                backLabel={language === 'NL' ? 'Validatie' : 'Validation'}
+                onNavigateToOrders={() => {
+                  setViewingValidationDetail(false);
+                  handleNav('validation');
+                }}
+                onNavigateToExceptions={() => handleNav('exceptions')}
+              />
+            ) : (
+              <OrdersView
+                mode="validation"
+                language={language}
+                onOpenOrder={(nr, orderId, emailId) => {
+                  setSelectedOrderNr(nr);
+                  if (orderId !== undefined) setSelectedOrderId(orderId);
+                  if (emailId !== undefined) setSelectedEmailId(emailId);
+                  setViewingValidationDetail(true);
+                  handleNav('validation', nr, orderId, emailId);
+                }}
+                onNavigateToExceptions={() => handleNav('exceptions')}
+              />
+            )
           ) : activeModule === 'exceptions' ? (
             <ExceptionsView
               language={language}
@@ -1303,7 +1370,10 @@ export const HomePage: React.FC<HomePageProps> = ({ initialModule = 'overview' }
                   )}
                   {hasPermission('validation') && (
                     <button
-                      onClick={() => handleNav('validation', 'AP-26-04819')}
+                      onClick={() => {
+                        setViewingValidationDetail(false);
+                        handleNav('validation');
+                      }}
                       className="bp"
                       style={{
                         minHeight: '44px',
@@ -1322,7 +1392,9 @@ export const HomePage: React.FC<HomePageProps> = ({ initialModule = 'overview' }
                         cursor: 'pointer',
                       }}
                     >
-                      {language === 'NL' ? 'START VALIDATIE ( 6 )' : 'START VALIDATION ( 6 )'}
+                      {language === 'NL'
+                        ? `START VALIDATIE ( ${validationCount} )`
+                        : `START VALIDATION ( ${validationCount} )`}
                       <svg className="s" viewBox="0 0 24 24">
                         <path d="M5 12h14M13 6l6 6-6 6" />
                       </svg>
@@ -1492,7 +1564,7 @@ export const HomePage: React.FC<HomePageProps> = ({ initialModule = 'overview' }
                       borderRadius: '2px',
                     }}
                   >
-                    6
+                    {validationCount}
                   </span>
                   <span style={{ fontSize: '12px', color: '#6B6B6B', marginLeft: 'auto' }}>
                     {language === 'NL'

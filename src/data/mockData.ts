@@ -25,6 +25,7 @@ export interface OrderItem {
   time: string;
   min: number;
   mb: 'info' | 'bestel' | 'persoonlijk';
+  rawMailbox?: string;
   from: string;
   subject: string;
   body: string;
