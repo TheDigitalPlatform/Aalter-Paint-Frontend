@@ -267,6 +267,54 @@ export async function fetchValidationOrdersCount(): Promise<number> {
   return typeof json.data?.count === 'number' ? json.data.count : 0;
 }
 
+export interface EmailAttachmentItem {
+  id: number;
+  email_id: number;
+  filename: string;
+  content_type: string;
+  file_size: number;
+  file_path: string;
+  blob_name?: string | null;
+  ocr_status?: string | null;
+  ocr_text?: string | null;
+  created_at?: string | null;
+}
+
+export interface EmailRecordDetail {
+  id: number;
+  message_id?: string;
+  mailbox?: string;
+  subject?: string | null;
+  sender?: string;
+  recipients?: any;
+  body_text?: string | null;
+  body_html?: string | null;
+  received_at?: string;
+  status?: string;
+  attachments?: EmailAttachmentItem[];
+}
+
+export async function fetchEmailById(emailId: number | string): Promise<EmailRecordDetail> {
+  const baseUrl = getApiBaseUrl();
+  const response = await fetch(`${baseUrl}/emails/${emailId}`, {
+    method: 'GET',
+    headers: getAuthHeaders(),
+  });
+
+  if (response.status === 401) {
+    handleUnauthorizedSession();
+    throw new Error('Unauthorized');
+  }
+
+  const json = await response.json();
+  if (!response.ok || !json.success) {
+    throw new Error(json.message || `Failed to fetch email ${emailId}`);
+  }
+
+  return json.data;
+}
+
+
 
 
 

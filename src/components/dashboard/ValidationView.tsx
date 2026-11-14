@@ -4,7 +4,14 @@ import { ConfidenceBadge } from '../common/ConfidenceBadge';
 import { type Language } from '../common/LanguageToggle';
 import { TablePagination } from '../common/TablePagination';
 import { useLanguage } from '../../context/LanguageContext';
-import { fetchOrderById, fetchOrderByEmailId, updateOrderLine, type OrderDetail } from '../../lib/ordersApi';
+import {
+  fetchOrderById,
+  fetchOrderByEmailId,
+  updateOrderLine,
+  fetchEmailById,
+  type OrderDetail,
+  type EmailAttachmentItem,
+} from '../../lib/ordersApi';
 import {
   INITIAL_ORDERS,
   CAT,
@@ -330,6 +337,13 @@ export function getLineIdFromLine(line?: OrderLine | null, fallbackLineIdStr?: s
   return undefined;
 }
 
+export function formatFileSize(bytes?: number): string {
+  if (!bytes || isNaN(bytes)) return '';
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
 export const ValidationView: React.FC<ValidationViewProps> = ({
   language,
   selectedOrderNr = 'AP-26-04819',
@@ -352,6 +366,8 @@ export const ValidationView: React.FC<ValidationViewProps> = ({
   const [loadingOrder, setLoadingOrder] = useState<boolean>(false);
   const [liveOrder, setLiveOrder] = useState<OrderItem | null>(null);
   const [confirmingLineId, setConfirmingLineId] = useState<string | null>(null);
+  const [attachments, setAttachments] = useState<EmailAttachmentItem[]>([]);
+  const [loadingAttachments, setLoadingAttachments] = useState<boolean>(false);
 
   // Sync prop changes
   useEffect(() => {
@@ -480,6 +496,47 @@ export const ValidationView: React.FC<ValidationViewProps> = ({
   const currentOrder = useMemo(() => {
     return orders.find((o) => o.nr === currentNr) || liveOrder || orders[2] || orders[0];
   }, [orders, currentNr, liveOrder]);
+
+  // Fetch live email attachments for current order
+  useEffect(() => {
+    let isCancelled = false;
+    const activeEmailId =
+      (currentOrder as any)?.email_id ||
+      (liveOrder as any)?.email_id ||
+      selectedEmailId;
+
+    if (!activeEmailId) {
+      setAttachments([]);
+      return;
+    }
+
+    setLoadingAttachments(true);
+    fetchEmailById(activeEmailId)
+      .then((emailData) => {
+        if (!isCancelled && emailData?.attachments) {
+          setAttachments(Array.isArray(emailData.attachments) ? emailData.attachments : []);
+        }
+      })
+      .catch((err) => {
+        console.warn('[ValidationView] Could not load attachments for email:', activeEmailId, err);
+        if (!isCancelled) setAttachments([]);
+      })
+      .finally(() => {
+        if (!isCancelled) setLoadingAttachments(false);
+      });
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [(currentOrder as any)?.email_id, (liveOrder as any)?.email_id, selectedEmailId]);
+
+  const handleOpenAttachment = (att: EmailAttachmentItem) => {
+    if (!att?.file_path) {
+      toast.error(isNl ? 'Geen bestandspad beschikbaar' : 'No file path available');
+      return;
+    }
+    window.open(att.file_path, '_blank', 'noopener,noreferrer');
+  };
 
   // Pending queue list
   const queueList = useMemo(() => {
@@ -1929,7 +1986,11 @@ export const ValidationView: React.FC<ValidationViewProps> = ({
               </div>
 
               <span style={{ fontSize: '12px', color: '#6B6B6B' }}>
-                {currentOrder.ocrKind || 'Getypte PDF'} · {currentOrder.att} ·{' '}
+                {currentOrder.ocrKind || 'Getypte PDF'} ·{' '}
+                {attachments.length > 0
+                  ? attachments.map((a) => a.filename).join(', ')
+                  : currentOrder.att}{' '}
+                ·{' '}
                 {isNl
                   ? 'geel = waar de AI de geselecteerde regel las'
                   : 'yellow = where AI read the selected line'}
@@ -1976,13 +2037,131 @@ export const ValidationView: React.FC<ValidationViewProps> = ({
 
               <p style={{ margin: 0, whiteSpace: 'pre-line', fontSize: '15px' }}>{currentOrder.body}</p>
 
-              <span style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '14px', fontWeight: 600 }}>
-                <svg className="s" viewBox="0 0 24 24">
-                  <path d="M14 3H6a1 1 0 0 0-1 1v16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8z" />
-                  <path d="M14 3v5h5" />
-                </svg>
-                {currentOrder.att}
-              </span>
+              {/* Live PDF attachments list (shown 1 below 1, click to open in new tab) */}
+              {loadingAttachments ? (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', color: '#6B6B6B', padding: '6px 0' }}>
+                  <span
+                    style={{
+                      width: '14px',
+                      height: '14px',
+                      border: '2px solid #E20714',
+                      borderTopColor: 'transparent',
+                      borderRadius: '50%',
+                      display: 'inline-block',
+                      animation: 'spin 0.8s linear infinite',
+                    }}
+                  />
+                  {isNl ? 'Bijlagen laden...' : 'Loading attachments...'}
+                </div>
+              ) : attachments.length > 0 ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '4px' }}>
+                  {attachments.map((att, idx) => (
+                    <div
+                      key={att.id || `${att.filename}-${idx}`}
+                      onClick={() => handleOpenAttachment(att)}
+                      role="button"
+                      tabIndex={0}
+                      title={isNl ? `Klik om ${att.filename} te openen in een nieuw tabblad` : `Click to open ${att.filename} in a new tab`}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        gap: '12px',
+                        padding: '10px 14px',
+                        background: '#FAFAFA',
+                        border: '1px solid #E5E7EB',
+                        borderRadius: '6px',
+                        cursor: 'pointer',
+                        transition: 'all 0.15s ease-in-out',
+                        userSelect: 'none',
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.background = '#FFF5F5';
+                        e.currentTarget.style.borderColor = '#E20714';
+                        e.currentTarget.style.transform = 'translateY(-1px)';
+                        e.currentTarget.style.boxShadow = '0 2px 6px rgba(226, 7, 20, 0.12)';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.background = '#FAFAFA';
+                        e.currentTarget.style.borderColor = '#E5E7EB';
+                        e.currentTarget.style.transform = 'none';
+                        e.currentTarget.style.boxShadow = 'none';
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0 }}>
+                        {/* Red PDF Icon */}
+                        <svg
+                          viewBox="0 0 24 24"
+                          style={{ width: '20px', height: '20px', color: '#E20714', flexShrink: 0 }}
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        >
+                          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                          <polyline points="14 2 14 8 20 8" />
+                          <line x1="16" y1="13" x2="8" y2="13" />
+                          <line x1="16" y1="17" x2="8" y2="17" />
+                        </svg>
+                        <span
+                          style={{
+                            fontSize: '14px',
+                            fontWeight: 600,
+                            color: '#1A1A1A',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap',
+                          }}
+                        >
+                          {att.filename}
+                        </span>
+                        {att.file_size ? (
+                          <span style={{ fontSize: '12px', color: '#6B6B6B', whiteSpace: 'nowrap' }}>
+                            ({formatFileSize(att.file_size)})
+                          </span>
+                        ) : null}
+                      </div>
+
+                      {/* Open in new tab link icon */}
+                      <span
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '4px',
+                          fontSize: '12px',
+                          fontWeight: 600,
+                          color: '#E20714',
+                          flexShrink: 0,
+                        }}
+                      >
+                        {isNl ? 'Openen' : 'Open'}
+                        <svg
+                          viewBox="0 0 24 24"
+                          style={{ width: '14px', height: '14px' }}
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        >
+                          <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+                          <polyline points="15 3 21 3 21 9" />
+                          <line x1="10" y1="14" x2="21" y2="3" />
+                        </svg>
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <span style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '14px', fontWeight: 600 }}>
+                  <svg className="s" viewBox="0 0 24 24">
+                    <path d="M14 3H6a1 1 0 0 0-1 1v16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8z" />
+                    <path d="M14 3v5h5" />
+                  </svg>
+                  {currentOrder.att}
+                </span>
+              )}
 
               <span
                 style={{
