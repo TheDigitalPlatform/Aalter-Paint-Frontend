@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { ConfidenceBadge } from '../common/ConfidenceBadge';
 import { type Language } from '../common/LanguageToggle';
+import { TablePagination } from '../common/TablePagination';
 import { useLanguage } from '../../context/LanguageContext';
 import { INITIAL_ORDERS, type OrderItem } from '../../data/mockData';
 import { fetchOrders, fetchAvailableMailboxes, type OrderListItem, type OrderInsightsSummary } from '../../lib/ordersApi';
@@ -130,6 +131,10 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
   const [fUncertain, setFUncertain] = useState(false);
   const [sortKey, setSortKey] = useState<SortKey>('received');
   const [sortDir, setSortDir] = useState<SortDir>('desc');
+
+  // Pagination State
+  const [page, setPage] = useState<number>(1);
+  const [pageSize, setPageSize] = useState<number>(25);
 
   // Live API State
   const [liveOrders, setLiveOrders] = useState<OrderListItem[] | null>(null);
@@ -510,6 +515,17 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
 
     return list;
   }, [filteredRows, sortKey, sortDir]);
+
+  // Reset to page 1 when search, filters, or sorting change
+  useEffect(() => {
+    setPage(1);
+  }, [search, fStatus, fMailbox, fAttention, fLong, fUncertain, sortKey, sortDir, mode]);
+
+  // Paginated rows for the current page view
+  const paginatedRows = useMemo(() => {
+    const startIndex = (page - 1) * pageSize;
+    return sortedRows.slice(startIndex, startIndex + pageSize);
+  }, [sortedRows, page, pageSize]);
 
   const handleSort = (key: SortKey) => {
     if (sortKey === key) {
@@ -1055,7 +1071,7 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
           </div>
 
           {/* Table Rows */}
-          {sortedRows.map((o, idx) => (
+          {paginatedRows.map((o, idx) => (
             <button
               key={o.nr}
               className="a-stag row"
@@ -1180,6 +1196,18 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
               {isNl ? 'Geen orders voor deze filters.' : 'No orders matching these filters.'}
             </div>
           )}
+
+          {/* Table Pagination matching reference design */}
+          <TablePagination
+            currentPage={page}
+            pageSize={pageSize}
+            totalItems={sortedRows.length}
+            onPageChange={setPage}
+            onPageSizeChange={setPageSize}
+            pageSizeOptions={[5, 10, 25, 50]}
+            itemLabel={isNl ? (mode === 'validation' ? 'validatie-orders' : 'bestellingen') : (mode === 'validation' ? 'validation orders' : 'orders')}
+            language={activeLang}
+          />
         </div>
       </div>
     </div>

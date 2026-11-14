@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { toast } from 'sonner';
 import { ConfidenceBadge } from '../common/ConfidenceBadge';
 import { type Language } from '../common/LanguageToggle';
+import { TablePagination } from '../common/TablePagination';
 import { useLanguage } from '../../context/LanguageContext';
 import { fetchOrderById, fetchOrderByEmailId, updateOrderLine, type OrderDetail } from '../../lib/ordersApi';
 import {
@@ -521,6 +522,10 @@ export const ValidationView: React.FC<ValidationViewProps> = ({
   const [scanOn, setScanOn] = useState(true);
   const [scanKey, setScanKey] = useState(0);
 
+  // Lines pagination state matching reference design
+  const [linesPage, setLinesPage] = useState<number>(1);
+  const [linesPageSize, setLinesPageSize] = useState<number>(10);
+
   // Approval sync animation state
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncResult, setSyncResult] = useState<{
@@ -548,8 +553,28 @@ export const ValidationView: React.FC<ValidationViewProps> = ({
     setComment('');
     setArtSearch('');
     setRalDraft('');
+    setLinesPage(1);
     return () => clearTimeout(scanTimer);
   }, [currentOrder.nr]);
+
+  // Paginated order lines
+  const paginatedLines = useMemo(() => {
+    const startIndex = (linesPage - 1) * linesPageSize;
+    return (currentOrder.lines || []).slice(startIndex, startIndex + linesPageSize);
+  }, [currentOrder.lines, linesPage, linesPageSize]);
+
+  // Auto-switch page if the selected line is on another page
+  useEffect(() => {
+    if (selLineId && currentOrder && currentOrder.lines) {
+      const idx = currentOrder.lines.findIndex((l) => l.id === selLineId);
+      if (idx >= 0) {
+        const targetPage = Math.floor(idx / linesPageSize) + 1;
+        if (targetPage !== linesPage) {
+          setLinesPage(targetPage);
+        }
+      }
+    }
+  }, [selLineId, linesPageSize, currentOrder.lines]);
 
   // Customer contact info
   const contact = CONTACT_DATA[currentOrder.klant] || {
@@ -2313,9 +2338,9 @@ export const ValidationView: React.FC<ValidationViewProps> = ({
           </div>
 
           {/* Lines list */}
-          {currentOrder.lines.map((l, i) => {
+          {paginatedLines.map((l, i) => {
             const isSelected = selLineId === l.id;
-            const idx = i + 1;
+            const idx = (linesPage - 1) * linesPageSize + i + 1;
             const checks = getLineChecks(l);
             const fails = checks.filter((c) => c.k === 'fail').length;
             const misses = checks.filter((c) => c.k === 'miss').length;
@@ -2824,6 +2849,18 @@ export const ValidationView: React.FC<ValidationViewProps> = ({
               </div>
             );
           })}
+
+          {/* Order Lines Pagination matching reference design */}
+          <TablePagination
+            currentPage={linesPage}
+            pageSize={linesPageSize}
+            totalItems={currentOrder.lines ? currentOrder.lines.length : 0}
+            onPageChange={setLinesPage}
+            onPageSizeChange={setLinesPageSize}
+            pageSizeOptions={[5, 10, 25, 50]}
+            itemLabel={isNl ? 'regels' : 'lines'}
+            language={activeLang}
+          />
 
           {/* 3. Decision Area (Beslissing) */}
           <div
