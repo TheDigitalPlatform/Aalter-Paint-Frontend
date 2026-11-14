@@ -185,15 +185,21 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
             if (data.available_mailboxes && data.available_mailboxes.length > 0) {
               setLiveMailboxes((prev) => Array.from(new Set([...prev, ...data.available_mailboxes!])));
             }
-            const liveTotal = data.insights?.total_orders ?? (
-              (!fAttention && !fLong && !fUncertain && !search.trim() && fStatus === 'alle' && fMailbox === 'alle')
-                ? data.total
-                : undefined
-            );
-            if (typeof liveTotal === 'number') {
-              if (mode === 'validation') {
-                window.dispatchEvent(new CustomEvent('validation_count_updated', { detail: liveTotal }));
-              } else {
+            if (mode === 'validation') {
+              const valTotal =
+                (!fAttention && !fLong && !fUncertain && !search.trim() && fStatus === 'alle' && fMailbox === 'alle')
+                  ? data.total
+                  : undefined;
+              if (typeof valTotal === 'number') {
+                window.dispatchEvent(new CustomEvent('validation_count_updated', { detail: valTotal }));
+              }
+            } else {
+              const liveTotal =
+                data.insights?.total_orders ??
+                ((!fAttention && !fLong && !fUncertain && !search.trim() && fStatus === 'alle' && fMailbox === 'alle')
+                  ? data.total
+                  : undefined);
+              if (typeof liveTotal === 'number') {
                 window.dispatchEvent(new CustomEvent('orders_count_updated', { detail: liveTotal }));
               }
             }
@@ -209,8 +215,11 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
 
     loadOrders(false);
 
-    // Auto-refresh periodically to automatically pick up newly incoming live orders
-    const intervalId = setInterval(() => loadOrders(true), 10000);
+    // Auto-refresh every 1 minute to automatically pick up newly incoming live orders
+    const intervalId = setInterval(() => {
+      console.log(`[OrdersView 1 min] ${new Date().toLocaleTimeString()} - Auto-refreshing orders table data...`);
+      loadOrders(true);
+    }, 60000);
 
     const handleFocus = () => loadOrders(true);
     const handleRefresh = () => loadOrders(true);
@@ -632,7 +641,7 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
   ];
 
   return (
-    <div className="a-in" style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+    <div key={`orders-view-${mode}`} className="a-in" style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
       {/* Title Header */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
         <h1
@@ -1073,7 +1082,7 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
           {/* Table Rows */}
           {paginatedRows.map((o, idx) => (
             <button
-              key={o.nr}
+              key={`row-${mode}-${page}-${o.nr}-${idx}`}
               className="a-stag row"
               onClick={() => onOpenOrder && onOpenOrder(o.nr, (o as any).order_id, (o as any).email_id)}
               style={{
@@ -1204,7 +1213,7 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
             totalItems={sortedRows.length}
             onPageChange={setPage}
             onPageSizeChange={setPageSize}
-            pageSizeOptions={[5, 10, 25, 50]}
+            pageSizeOptions={[10, 25, 50]}
             itemLabel={isNl ? (mode === 'validation' ? 'validatie-orders' : 'bestellingen') : (mode === 'validation' ? 'validation orders' : 'orders')}
             language={activeLang}
           />

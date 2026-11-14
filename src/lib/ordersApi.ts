@@ -227,6 +227,47 @@ export async function fetchAvailableMailboxes(): Promise<string[]> {
   }
 }
 
+export async function fetchOrdersCount(): Promise<number> {
+  const baseUrl = getApiBaseUrl();
+  const response = await fetch(`${baseUrl}/orders/count`, {
+    method: 'GET',
+    headers: getAuthHeaders(),
+  });
+
+  if (response.status === 401) {
+    handleUnauthorizedSession();
+    throw new Error('Unauthorized');
+  }
+
+  const json = await response.json();
+  if (!response.ok || !json.success) {
+    throw new Error(json.message || 'Failed to fetch orders count');
+  }
+
+  return typeof json.data?.count === 'number' ? json.data.count : 0;
+}
+
+export async function fetchValidationOrdersCount(): Promise<number> {
+  const baseUrl = getApiBaseUrl();
+  const response = await fetch(`${baseUrl}/orders/validation/count`, {
+    method: 'GET',
+    headers: getAuthHeaders(),
+  });
+
+  if (response.status === 401) {
+    handleUnauthorizedSession();
+    throw new Error('Unauthorized');
+  }
+
+  const json = await response.json();
+  if (!response.ok || !json.success) {
+    throw new Error(json.message || 'Failed to fetch validation count');
+  }
+
+  return typeof json.data?.count === 'number' ? json.data.count : 0;
+}
+
+
 
 
 

@@ -18,7 +18,7 @@ export const TablePagination: React.FC<TablePaginationProps> = ({
   totalItems,
   onPageChange,
   onPageSizeChange,
-  pageSizeOptions = [5, 10, 25, 50],
+  pageSizeOptions = [10, 25, 50],
   itemLabel,
   language = 'NL',
 }) => {

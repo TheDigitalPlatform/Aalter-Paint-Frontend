@@ -1197,7 +1197,7 @@ export const ValidationView: React.FC<ValidationViewProps> = ({
     : 'Ready for review';
 
   return (
-    <div className="a-in" style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+    <div key={`val-view-${currentOrder.nr}`} className="a-in" style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
       {/* 1. Header with Queue Navigation & Customer Info */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
         {/* Back Link & Queue Position Controls */}
@@ -2367,7 +2367,7 @@ export const ValidationView: React.FC<ValidationViewProps> = ({
 
             return (
               <div
-                key={l.id}
+                key={`val-line-${currentOrder.nr}-${linesPage}-${l.id}`}
                 className="a-stag"
                 style={{
                   animationDelay: `${80 + i * 70}ms`,
@@ -2857,7 +2857,7 @@ export const ValidationView: React.FC<ValidationViewProps> = ({
             totalItems={currentOrder.lines ? currentOrder.lines.length : 0}
             onPageChange={setLinesPage}
             onPageSizeChange={setLinesPageSize}
-            pageSizeOptions={[5, 10, 25, 50]}
+            pageSizeOptions={[10, 25, 50]}
             itemLabel={isNl ? 'regels' : 'lines'}
             language={activeLang}
           />

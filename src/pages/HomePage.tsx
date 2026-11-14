@@ -16,7 +16,7 @@ import { ProfileView } from '../components/dashboard/ProfileView';
 import { getInitials, fetchMyProfile, getRoleName } from '../lib/profileApi';
 import { getRoleBadgeStyle } from '../lib/roleModuleApi';
 import { getModuleDisplayName, type FrontendModuleId } from '../lib/rbac';
-import { fetchOrders } from '../lib/ordersApi';
+import { fetchOrders, fetchOrdersCount, fetchValidationOrdersCount } from '../lib/ordersApi';
 import { User, LogOut, ChevronDown, ChevronUp, Shield } from 'lucide-react';
 import { toast } from 'sonner';
 import { FLOW_TILES, WAITING_ORDERS_DATA, NOTIFICATIONS_DATA } from '../data/mockData';
@@ -131,46 +131,44 @@ export const HomePage: React.FC<HomePageProps> = ({ initialModule = 'overview' }
 
   const [viewingValidationDetail, setViewingValidationDetail] = useState<boolean>(false);
 
-  // Dynamically load live order & validation counts for the sidebar badge and auto-refresh on updates
+  // Dynamically load live order & validation counts for the sidebar badge using dedicated count APIs
   useEffect(() => {
     let isCancelled = false;
 
     const loadLiveCounts = async () => {
+      console.log(`[Auto-Reload 1 min] ${new Date().toLocaleTimeString()} - Calling /api/orders/count and /api/orders/validation/count...`);
+
       try {
-        const data = await fetchOrders({ limit: 1 });
-        if (!isCancelled && data) {
-          const liveTotal = data.insights?.total_orders ?? data.total;
-          if (typeof liveTotal === 'number') {
-            setOrdersCount(liveTotal);
-            try {
-              sessionStorage.setItem('live_orders_total', String(liveTotal));
-            } catch {}
-          }
+        const total = await fetchOrdersCount();
+        if (!isCancelled && typeof total === 'number') {
+          setOrdersCount(total);
+          try {
+            sessionStorage.setItem('live_orders_total', String(total));
+          } catch {}
         }
-      } catch {
-        // Keep previous count if unauthenticated or network failure
+      } catch (err) {
+        console.warn('[Auto-Reload 1 min] fetchOrdersCount failed:', err);
       }
 
       try {
-        const valData = await fetchOrders({ status: 'validation', limit: 1 });
-        if (!isCancelled && valData) {
-          const liveValTotal = valData.total;
-          if (typeof liveValTotal === 'number') {
-            setValidationCount(liveValTotal);
-            try {
-              sessionStorage.setItem('live_validation_total', String(liveValTotal));
-            } catch {}
-          }
+        const valTotal = await fetchValidationOrdersCount();
+        if (!isCancelled && typeof valTotal === 'number') {
+          setValidationCount(valTotal);
+          try {
+            sessionStorage.setItem('live_validation_total', String(valTotal));
+          } catch {}
         }
-      } catch {
-        // Keep previous count if unauthenticated or network failure
+      } catch (err) {
+        console.warn('[Auto-Reload 1 min] fetchValidationOrdersCount failed:', err);
       }
     };
 
     loadLiveCounts();
 
-    // Auto-refresh periodically to reflect newly incoming orders
-    const intervalId = setInterval(loadLiveCounts, 10000);
+    // Auto-reload every 1 minute (60,000 ms) for both count APIs
+    const intervalId = setInterval(() => {
+      loadLiveCounts();
+    }, 60000);
 
     // Immediate reactive update whenever OrdersView fetches orders
     const handleOrdersCountEvent = (e: Event) => {
@@ -195,6 +193,7 @@ export const HomePage: React.FC<HomePageProps> = ({ initialModule = 'overview' }
 
     window.addEventListener('orders_count_updated', handleOrdersCountEvent);
     window.addEventListener('validation_count_updated', handleValidationCountEvent);
+    window.addEventListener('orders_refreshed', loadLiveCounts);
     window.addEventListener('focus', loadLiveCounts);
 
     return () => {
@@ -202,6 +201,7 @@ export const HomePage: React.FC<HomePageProps> = ({ initialModule = 'overview' }
       clearInterval(intervalId);
       window.removeEventListener('orders_count_updated', handleOrdersCountEvent);
       window.removeEventListener('validation_count_updated', handleValidationCountEvent);
+      window.removeEventListener('orders_refreshed', loadLiveCounts);
       window.removeEventListener('focus', loadLiveCounts);
     };
   }, []);
@@ -1240,9 +1240,10 @@ export const HomePage: React.FC<HomePageProps> = ({ initialModule = 'overview' }
           }}
         >
           {activeModule === 'profile' ? (
-            <ProfileView />
+            <ProfileView key="view-profile" />
           ) : activeModule === 'insights' ? (
             <InsightsView
+              key="view-insights"
               language={language}
               onNavigateToOrders={() => handleNav('orders')}
               onNavigateToExceptions={() => handleNav('exceptions')}
@@ -1250,6 +1251,7 @@ export const HomePage: React.FC<HomePageProps> = ({ initialModule = 'overview' }
             />
           ) : activeModule === 'orders' ? (
             <OrdersView
+              key="view-orders"
               language={language}
               onOpenOrder={(nr, orderId, emailId) => handleNav('validation', nr, orderId, emailId)}
               onNavigateToExceptions={() => handleNav('exceptions')}
@@ -1257,6 +1259,7 @@ export const HomePage: React.FC<HomePageProps> = ({ initialModule = 'overview' }
           ) : activeModule === 'validation' ? (
             viewingValidationDetail ? (
               <ValidationView
+                key={`view-val-detail-${selectedOrderNr}`}
                 language={language}
                 selectedOrderNr={selectedOrderNr}
                 selectedOrderId={selectedOrderId}
@@ -1271,6 +1274,7 @@ export const HomePage: React.FC<HomePageProps> = ({ initialModule = 'overview' }
               />
             ) : (
               <OrdersView
+                key="view-validation-queue"
                 mode="validation"
                 language={language}
                 onOpenOrder={(nr, orderId, emailId) => {
@@ -1285,6 +1289,7 @@ export const HomePage: React.FC<HomePageProps> = ({ initialModule = 'overview' }
             )
           ) : activeModule === 'exceptions' ? (
             <ExceptionsView
+              key="view-exceptions"
               language={language}
               userName={userName}
               onOpenOrder={(nr) => handleNav('validation', nr)}
@@ -1292,24 +1297,28 @@ export const HomePage: React.FC<HomePageProps> = ({ initialModule = 'overview' }
             />
           ) : activeModule === 'institutions' ? (
             <SettingsView
+              key="view-institutions"
               language={language}
               userName={userName}
             />
           ) : activeModule === 'roles' ? (
             <RolesView
+              key="view-roles"
               language={language}
               currentUserId={user?.id}
             />
           ) : activeModule === 'audit' ? (
             <AuditView
+              key="view-audit"
               language={language}
             />
           ) : activeModule === 'learning' ? (
             <LearningView
+              key="view-learning"
               language={language}
             />
           ) : (
-            <div className="a-in" style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+            <div key="view-overview" className="a-in" style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
               {/* Top Action Header */}
               <div
                 style={{
