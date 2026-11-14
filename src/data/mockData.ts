@@ -38,6 +38,8 @@ export interface OrderItem {
   lines: OrderLine[];
   approvedBy?: string;
   approvedAt?: string;
+  comment?: string;
+  outlook_status?: string;
   rejectedBy?: string;
   rejectedAt?: string;
   rejectReason?: string;

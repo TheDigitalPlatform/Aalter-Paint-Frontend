@@ -482,7 +482,13 @@ export const ValidationView: React.FC<ValidationViewProps> = ({
 
   // Pending queue list
   const queueList = useMemo(() => {
-    return orders.filter((o) => o.st === 'pending' || o.st === 'verwerking');
+    return orders.filter(
+      (o) =>
+        o.st === 'pending' ||
+        o.st === 'verwerking' ||
+        o.st === 'klaar' ||
+        o.st === 'aandacht'
+    );
   }, [orders]);
 
   const queueIdx = queueList.findIndex((o) => o.nr === currentOrder.nr);
@@ -941,14 +947,18 @@ export const ValidationView: React.FC<ValidationViewProps> = ({
 
   // Approve Order
   const handleApprove = () => {
-    if (hasBlockers) return;
+    if (hasBlockers || isSyncing) return;
 
     setIsSyncing(true);
+    const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const nowTs = `${currentOrder.day || '08/10/2026'} ${timeStr}`;
+
     const updatedOrder: OrderItem = {
       ...currentOrder,
       st: 'goedgekeurd',
       approvedBy: userName,
-      approvedAt: `${currentOrder.day} 16:45`,
+      approvedAt: nowTs,
+      comment: comment.trim() || undefined,
     };
 
     const newOrders = orders.map((o) => (o.nr === currentOrder.nr ? updatedOrder : o));
@@ -956,14 +966,21 @@ export const ValidationView: React.FC<ValidationViewProps> = ({
     if (onOrderUpdated) onOrderUpdated(updatedOrder);
     window.dispatchEvent(new CustomEvent('orders_refreshed'));
 
-    // Simulate BC sync completion after 1.8s
+    toast.info(
+      isNl
+        ? 'Goedgekeurd. Order wordt naar Business Central verstuurd.'
+        : 'Approved. Order is being sent to Business Central.'
+    );
+
+    // Business Central sync sequence matching AalterPaint_Demo_9_10.html
     setTimeout(() => {
       setIsSyncing(false);
-      const voNumber = `VO-26-01874`;
+      const voNumber = `VO-26-018742`;
       const syncedOrder: OrderItem = {
         ...updatedOrder,
         st: 'gesync',
         vo: voNumber,
+        syncAt: nowTs,
       };
       setOrders((prev) => prev.map((o) => (o.nr === currentOrder.nr ? syncedOrder : o)));
       setSyncResult({
@@ -971,8 +988,8 @@ export const ValidationView: React.FC<ValidationViewProps> = ({
         synced: true,
         vo: voNumber,
         title: isNl
-          ? `Goedgekeurd door ${userName} om 16:45`
-          : `Approved by ${userName} at 16:45`,
+          ? `Goedgekeurd door ${userName} om ${timeStr}`
+          : `Approved by ${userName} at ${timeStr}`,
         text: isNl
           ? `Verkooporder ${voNumber} succesvol aangemaakt in Business Central. Outlook-tag: Goedgekeurd.`
           : `Sales order ${voNumber} successfully created in Business Central. Outlook tag: Approved.`,
@@ -982,18 +999,33 @@ export const ValidationView: React.FC<ValidationViewProps> = ({
           ? `Verkooporder ${voNumber} aangemaakt in Business Central`
           : `Sales order ${voNumber} created in Business Central`
       );
+      setComment('');
       if (onOrderUpdated) onOrderUpdated(syncedOrder);
       window.dispatchEvent(new CustomEvent('orders_refreshed'));
-    }, 1800);
+    }, 1500);
   };
 
   // Reject Order
   const handleReject = () => {
-    if (!comment.trim()) return;
+    const trimmedReason = comment.trim();
+    if (!trimmedReason) {
+      toast.error(
+        isNl
+          ? 'Vul eerst een opmerking in om de bestelling af te wijzen.'
+          : 'Please enter a note before rejecting the order.'
+      );
+      return;
+    }
+
+    const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const nowTs = `${currentOrder.day || '08/10/2026'} ${timeStr}`;
 
     const updatedOrder: OrderItem = {
       ...currentOrder,
       st: 'afgewezen',
+      rejectedBy: userName,
+      rejectedAt: nowTs,
+      rejectReason: trimmedReason,
     };
 
     const newOrders = orders.map((o) => (o.nr === currentOrder.nr ? updatedOrder : o));
@@ -1002,17 +1034,18 @@ export const ValidationView: React.FC<ValidationViewProps> = ({
       show: true,
       synced: false,
       title: isNl
-        ? `Afgewezen door ${userName}`
-        : `Rejected by ${userName}`,
+        ? `Afgewezen door ${userName} op ${nowTs}`
+        : `Rejected by ${userName} on ${nowTs}`,
       text: isNl
-        ? `Reden: ${comment}. Er ging niets naar Business Central. Outlook-tag: Afgewezen.`
-        : `Reason: ${comment}. Nothing was sent to Business Central. Outlook tag: Rejected.`,
+        ? `Reden: ${trimmedReason}. Er ging niets naar Business Central. Outlook-tag: Afgewezen.`
+        : `Reason: ${trimmedReason}. Nothing was sent to Business Central. Outlook tag: Rejected.`,
     });
     toast.error(
       isNl
-        ? `Order ${currentOrder.nr} afgewezen`
-        : `Order ${currentOrder.nr} rejected`
+        ? `Order ${currentOrder.nr} afgewezen. Er gaat niets naar Business Central.`
+        : `Order ${currentOrder.nr} rejected. Nothing sent to Business Central.`
     );
+    setComment('');
     if (onOrderUpdated) onOrderUpdated(updatedOrder);
     window.dispatchEvent(new CustomEvent('orders_refreshed'));
   };
@@ -1104,7 +1137,7 @@ export const ValidationView: React.FC<ValidationViewProps> = ({
   // Order status chip styling
   const isApproved = currentOrder.st === 'goedgekeurd' || currentOrder.st === 'gesync';
   const isRejected = currentOrder.st === 'afgewezen';
-  const isPending = currentOrder.st === 'pending' || currentOrder.st === 'verwerking';
+  const isPending = !isApproved && !isRejected && currentOrder.st !== 'syncfout';
 
   const statusChipBg = isApproved
     ? '#E3F2E9'
@@ -2803,13 +2836,13 @@ export const ValidationView: React.FC<ValidationViewProps> = ({
             }}
           >
             <span style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', color: '#4D4D4D' }}>
-              <svg className="s" viewBox="0 0 24 24">
+              <svg className="s" viewBox="0 0 24 24" style={{ width: '16px', height: '16px', stroke: 'currentColor', fill: 'none', strokeWidth: 2 }}>
                 <rect x="4" y="11" width="16" height="10" rx="1" />
                 <path d="M8 11V7a4 4 0 0 1 8 0v4" />
               </svg>
               {isNl
                 ? 'Niets gaat automatisch naar Business Central. Enkel wat jij goedkeurt, wordt een verkooporder.'
-                : 'Nothing goes automatically to Business Central. Only what you approve becomes a sales order.'}
+                : 'Nothing goes to Business Central automatically. Only what you approve becomes a sales order.'}
             </span>
 
             {isPending && (
@@ -2839,7 +2872,7 @@ export const ValidationView: React.FC<ValidationViewProps> = ({
                       flex: '1 1 260px',
                     }}
                   >
-                    {isNl ? 'Opmerking (verplicht bij afwijzen)' : 'Comment (required when rejecting)'}
+                    {isNl ? 'Opmerking (verplicht bij afwijzen)' : 'Note (required for rejection)'}
                     <input
                       type="text"
                       value={comment}
@@ -2847,7 +2880,7 @@ export const ValidationView: React.FC<ValidationViewProps> = ({
                       placeholder={
                         isNl
                           ? 'bv. Levering vrijdag bevestigd met klant'
-                          : 'e.g. Delivery confirmed for Friday with customer'
+                          : 'e.g. Delivery confirmed with custom...'
                       }
                       style={{
                         height: '48px',
@@ -2869,8 +2902,9 @@ export const ValidationView: React.FC<ValidationViewProps> = ({
                     style={{
                       minHeight: '48px',
                       padding: '0 18px',
-                      border: '1px solid #1A1A1A',
+                      border: `1px solid ${!comment.trim() ? '#DADADA' : '#1A1A1A'}`,
                       background: '#FFFFFF',
+                      color: !comment.trim() ? '#BFBFBF' : '#1A1A1A',
                       borderRadius: 0,
                       fontWeight: 700,
                       display: 'flex',
@@ -2880,9 +2914,10 @@ export const ValidationView: React.FC<ValidationViewProps> = ({
                       letterSpacing: '0.06em',
                       fontSize: '13px',
                       cursor: !comment.trim() ? 'not-allowed' : 'pointer',
+                      transition: 'all 0.15s ease',
                     }}
                   >
-                    {isNl ? 'Afwijzen' : 'Reject'}
+                    {isNl ? 'AFWIJZEN' : 'REJECT'}
                   </button>
 
                   {/* Approve button */}
@@ -2894,7 +2929,7 @@ export const ValidationView: React.FC<ValidationViewProps> = ({
                       minHeight: '48px',
                       padding: '0 20px',
                       border: 0,
-                      background: '#E20714',
+                      background: hasBlockers || isSyncing ? '#E2071480' : '#E20714',
                       color: '#FFFFFF',
                       borderRadius: 0,
                       fontWeight: 700,
@@ -2905,12 +2940,28 @@ export const ValidationView: React.FC<ValidationViewProps> = ({
                       letterSpacing: '0.06em',
                       fontSize: '13px',
                       cursor: hasBlockers || isSyncing ? 'not-allowed' : 'pointer',
+                      opacity: hasBlockers ? 0.6 : 1,
+                      transition: 'all 0.15s ease',
                     }}
                   >
-                    <svg className="s" viewBox="0 0 24 24">
-                      <path d="M20 6L9 17l-5-5" />
-                    </svg>
-                    {isNl ? 'Goedkeuren' : 'Approve'}
+                    {isSyncing ? (
+                      <span
+                        style={{
+                          width: '14px',
+                          height: '14px',
+                          border: '2px solid #FFFFFF',
+                          borderTopColor: 'transparent',
+                          borderRadius: '50%',
+                          display: 'inline-block',
+                          animation: 'spin 0.6s linear infinite',
+                        }}
+                      />
+                    ) : (
+                      <svg className="s" viewBox="0 0 24 24" style={{ width: '16px', height: '16px', stroke: 'currentColor', fill: 'none', strokeWidth: 2.5 }}>
+                        <path d="M20 6L9 17l-5-5" />
+                      </svg>
+                    )}
+                    {isNl ? 'GOEDKEUREN' : 'APPROVE'}
                   </button>
                 </div>
               </div>
@@ -2972,7 +3023,7 @@ export const ValidationView: React.FC<ValidationViewProps> = ({
             )}
 
             {/* Approval / Sync Result Banner */}
-            {syncResult && (
+            {(syncResult || isApproved || isRejected) && (
               <div
                 className="a-in"
                 style={{
@@ -2980,11 +3031,11 @@ export const ValidationView: React.FC<ValidationViewProps> = ({
                   alignItems: 'flex-start',
                   gap: '12px',
                   padding: '14px 16px',
-                  background: syncResult.synced ? '#E3F2E9' : '#FCE8E8',
-                  color: syncResult.synced ? '#11603B' : '#A61B1B',
+                  background: (syncResult ? syncResult.synced : isApproved) ? '#E3F2E9' : '#FCE8E8',
+                  color: (syncResult ? syncResult.synced : isApproved) ? '#11603B' : '#A61B1B',
                 }}
               >
-                {syncResult.synced && (
+                {(syncResult ? syncResult.synced : isApproved) ? (
                   <span
                     className="a-pop"
                     style={{
@@ -2999,20 +3050,57 @@ export const ValidationView: React.FC<ValidationViewProps> = ({
                       flex: 'none',
                     }}
                   >
-                    <svg className="i" viewBox="0 0 24 24" style={{ strokeWidth: 2.5 }}>
+                    <svg className="i" viewBox="0 0 24 24" style={{ width: '16px', height: '16px', stroke: 'currentColor', fill: 'none', strokeWidth: 2.5 }}>
                       <path d="M20 6L9 17l-5-5" />
+                    </svg>
+                  </span>
+                ) : (
+                  <span
+                    className="a-pop"
+                    style={{
+                      width: '30px',
+                      height: '30px',
+                      borderRadius: '50%',
+                      background: '#A61B1B',
+                      color: '#FFFFFF',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      flex: 'none',
+                    }}
+                  >
+                    <svg className="i" viewBox="0 0 24 24" style={{ width: '16px', height: '16px', stroke: 'currentColor', fill: 'none', strokeWidth: 2.5 }}>
+                      <path d="M18 6L6 18M6 6l12 12" />
                     </svg>
                   </span>
                 )}
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', flexGrow: 1 }}>
-                  <span style={{ fontWeight: 700, fontSize: '15px' }}>{syncResult.title}</span>
-                  <span style={{ fontSize: '14px' }}>{syncResult.text}</span>
+                  <span style={{ fontWeight: 700, fontSize: '15px' }}>
+                    {syncResult?.title ||
+                      (isApproved
+                        ? (isNl
+                            ? `Goedgekeurd door ${currentOrder.approvedBy || userName} op ${currentOrder.approvedAt || currentOrder.day}`
+                            : `Approved by ${currentOrder.approvedBy || userName} on ${currentOrder.approvedAt || currentOrder.day}`)
+                        : (isNl
+                            ? `Afgewezen door ${currentOrder.rejectedBy || userName} op ${currentOrder.rejectedAt || currentOrder.day}`
+                            : `Rejected by ${currentOrder.rejectedBy || userName} on ${currentOrder.rejectedAt || currentOrder.day}`))}
+                  </span>
+                  <span style={{ fontSize: '14px' }}>
+                    {syncResult?.text ||
+                      (isApproved
+                        ? (isNl
+                            ? `Verkooporder ${currentOrder.vo || 'VO-26-018742'} aangemaakt in Business Central. Outlook-tag: Goedgekeurd.`
+                            : `Sales order ${currentOrder.vo || 'VO-26-018742'} created in Business Central. Outlook tag: Approved.`)
+                        : (isNl
+                            ? `Reden: ${currentOrder.rejectReason || 'Order afgewezen'}. Er ging niets naar Business Central. Outlook-tag: Afgewezen.`
+                            : `Reason: ${currentOrder.rejectReason || 'Order rejected'}. Nothing was sent to Business Central. Outlook tag: Rejected.`))}
+                  </span>
                 </div>
               </div>
             )}
 
             {/* Next order button if available */}
-            {syncResult && (
+            {(syncResult || isApproved || isRejected) && (
               <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', paddingTop: '4px' }}>
                 <button
                   onClick={handleNextOrder}
