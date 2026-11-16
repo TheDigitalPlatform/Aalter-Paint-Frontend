@@ -314,6 +314,52 @@ export async function fetchEmailById(emailId: number | string): Promise<EmailRec
   return json.data;
 }
 
+export interface WaitingOrderItem {
+  order_id: number;
+  order_number: string;
+  email_id: number;
+  customer_name?: string | null;
+  customer_reference?: string | null;
+  received_at?: string | null;
+  status: string;
+  category: string;
+  confidence?: number | null;
+  confidence_summary?: string | null;
+  reason: string;
+  lines_count: number;
+  missing_fields: string[];
+  review_reasons: string[];
+  wait_hours: number;
+  wait_text: string;
+  wait_color: string;
+}
+
+export interface WaitingOrdersResponseData {
+  items: WaitingOrderItem[];
+  total_waiting: number;
+}
+
+export async function fetchWaitingForYouOrders(limit: number = 10): Promise<WaitingOrdersResponseData> {
+  const baseUrl = getApiBaseUrl();
+  const response = await fetch(`${baseUrl}/orders/waiting-for-you?limit=${limit}`, {
+    method: 'GET',
+    headers: getAuthHeaders(),
+  });
+
+  if (response.status === 401) {
+    handleUnauthorizedSession();
+    throw new Error('Unauthorized');
+  }
+
+  const json = await response.json();
+  if (!response.ok || !json.success) {
+    throw new Error(json.message || 'Failed to fetch waiting orders');
+  }
+
+  return json.data;
+}
+
+
 
 
 

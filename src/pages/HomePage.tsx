@@ -16,10 +16,10 @@ import { ProfileView } from '../components/dashboard/ProfileView';
 import { getInitials, fetchMyProfile, getRoleName } from '../lib/profileApi';
 import { getRoleBadgeStyle } from '../lib/roleModuleApi';
 import { getModuleDisplayName, type FrontendModuleId } from '../lib/rbac';
-import { fetchOrders, fetchOrdersCount, fetchValidationOrdersCount } from '../lib/ordersApi';
+import { fetchOrders, fetchOrdersCount, fetchValidationOrdersCount, fetchWaitingForYouOrders, type WaitingOrderItem } from '../lib/ordersApi';
 import { User, LogOut, ChevronDown, ChevronUp, Shield } from 'lucide-react';
 import { toast } from 'sonner';
-import { FLOW_TILES, WAITING_ORDERS_DATA, NOTIFICATIONS_DATA } from '../data/mockData';
+import { FLOW_TILES, NOTIFICATIONS_DATA } from '../data/mockData';
 
 export type ActiveModule = FrontendModuleId;
 
@@ -123,20 +123,22 @@ export const HomePage: React.FC<HomePageProps> = ({ initialModule = 'overview' }
   const [validationCount, setValidationCount] = useState<number>(() => {
     try {
       const cached = sessionStorage.getItem('live_validation_total');
-      return cached ? parseInt(cached, 10) : 6;
+      return cached ? parseInt(cached, 10) : 0;
     } catch {
-      return 6;
+      return 0;
     }
   });
 
   const [viewingValidationDetail, setViewingValidationDetail] = useState<boolean>(false);
+  const [waitingOrders, setWaitingOrders] = useState<WaitingOrderItem[]>([]);
+  const [loadingWaitingOrders, setLoadingWaitingOrders] = useState<boolean>(true);
 
-  // Dynamically load live order & validation counts for the sidebar badge using dedicated count APIs
+  // Dynamically load live order & validation counts and top waiting orders for the Overview page
   useEffect(() => {
     let isCancelled = false;
 
     const loadLiveCounts = async () => {
-      console.log(`[Auto-Reload 1 min] ${new Date().toLocaleTimeString()} - Calling /api/orders/count and /api/orders/validation/count...`);
+      console.log(`[Auto-Reload 1 min] ${new Date().toLocaleTimeString()} - Calling /api/orders/count, /api/orders/validation/count, and /api/orders/waiting-for-you...`);
 
       try {
         const total = await fetchOrdersCount();
@@ -161,11 +163,30 @@ export const HomePage: React.FC<HomePageProps> = ({ initialModule = 'overview' }
       } catch (err) {
         console.warn('[Auto-Reload 1 min] fetchValidationOrdersCount failed:', err);
       }
+
+      try {
+        const waitingData = await fetchWaitingForYouOrders(10);
+        if (!isCancelled && waitingData) {
+          setWaitingOrders(waitingData.items || []);
+          if (typeof waitingData.total_waiting === 'number') {
+            setValidationCount(waitingData.total_waiting);
+            try {
+              sessionStorage.setItem('live_validation_total', String(waitingData.total_waiting));
+            } catch {}
+          }
+        }
+      } catch (err) {
+        console.warn('[Auto-Reload 1 min] fetchWaitingForYouOrders failed:', err);
+      } finally {
+        if (!isCancelled) {
+          setLoadingWaitingOrders(false);
+        }
+      }
     };
 
     loadLiveCounts();
 
-    // Auto-reload every 1 minute (60,000 ms) for both count APIs
+    // Auto-reload every 1 minute (60,000 ms) for counts and waiting orders
     const intervalId = setInterval(() => {
       loadLiveCounts();
     }, 60000);
@@ -189,6 +210,7 @@ export const HomePage: React.FC<HomePageProps> = ({ initialModule = 'overview' }
           sessionStorage.setItem('live_validation_total', String(customEvt.detail));
         } catch {}
       }
+      loadLiveCounts();
     };
 
     window.addEventListener('orders_count_updated', handleOrdersCountEvent);
@@ -264,9 +286,9 @@ export const HomePage: React.FC<HomePageProps> = ({ initialModule = 'overview' }
       labelNl: 'Orders',
       labelEn: 'Orders',
       badge: ordersCount,
-      badgeBg: '#F1F5F9',
-      badgeColor: '#334155',
-      badgeBorder: '1px solid #E2E8F0',
+      badgeBg: '#FEF2F2',
+      badgeColor: '#B91C1C',
+      badgeBorder: '1px solid #FECACA',
       icon: (active) => (
         <svg className="i" viewBox="0 0 24 24" style={{ color: active ? '#E20714' : 'currentColor' }}>
           <path d="M4 6h16M4 12h16M4 18h10" />
@@ -278,8 +300,9 @@ export const HomePage: React.FC<HomePageProps> = ({ initialModule = 'overview' }
       labelNl: 'Validatie',
       labelEn: 'Validation',
       badge: validationCount,
-      badgeBg: '#E20714',
-      badgeColor: '#FFFFFF',
+      badgeBg: '#FEF2F2',
+      badgeColor: '#B91C1C',
+      badgeBorder: '1px solid #FECACA',
       icon: (active) => (
         <svg className="i" viewBox="0 0 24 24" style={{ color: active ? '#E20714' : 'currentColor' }}>
           <path d="M9 11l3 3 8-8" />
@@ -361,6 +384,11 @@ export const HomePage: React.FC<HomePageProps> = ({ initialModule = 'overview' }
     const label = language === 'NL' ? item.labelNl : item.labelEn;
     const tooltip = item.badge !== undefined ? `${label} (${item.badge})` : label;
 
+    // Dark solid red background only when active on that page, soft light red (like exception count) when inactive
+    const badgeBg = isActive ? '#E20714' : (item.badgeBg || '#FEF2F2');
+    const badgeColor = isActive ? '#FFFFFF' : (item.badgeColor || '#B91C1C');
+    const badgeBorder = isActive ? '1px solid #E20714' : (item.badgeBorder || '1px solid #FECACA');
+
     return (
       <button
         key={item.id}
@@ -418,10 +446,10 @@ export const HomePage: React.FC<HomePageProps> = ({ initialModule = 'overview' }
               minWidth: '15px',
               height: '15px',
               padding: '0 3.5px',
-              background: item.badgeBg || '#EBEBEB',
-              color: item.badgeColor || '#242424',
-              borderRadius: '8px',
-              border: item.badgeBorder || 'none',
+              background: badgeBg,
+              color: badgeColor,
+              borderRadius: '2px',
+              border: badgeBorder,
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
@@ -455,11 +483,15 @@ export const HomePage: React.FC<HomePageProps> = ({ initialModule = 'overview' }
               fontSize: '11px',
               fontWeight: 700,
               padding: '1px 6px',
-              background: item.badgeBg || '#EBEBEB',
-              color: item.badgeColor || '#242424',
-              borderRadius: '10px',
-              border: item.badgeBorder || 'none',
+              background: badgeBg,
+              color: badgeColor,
+              borderRadius: '2px',
+              border: badgeBorder,
+              minWidth: '18px',
+              textAlign: 'center',
+              lineHeight: '16px',
               flexShrink: 0,
+              transition: 'background 0.15s ease, color 0.15s ease, border-color 0.15s ease',
             }}
           >
             {item.badge}
@@ -1259,7 +1291,7 @@ export const HomePage: React.FC<HomePageProps> = ({ initialModule = 'overview' }
           ) : activeModule === 'validation' ? (
             viewingValidationDetail ? (
               <ValidationView
-                key={`view-val-detail-${selectedOrderNr}`}
+                key={`view-val-detail-${selectedOrderNr}-${selectedEmailId ?? selectedOrderId ?? ''}`}
                 language={language}
                 selectedOrderNr={selectedOrderNr}
                 selectedOrderId={selectedOrderId}
@@ -1564,6 +1596,8 @@ export const HomePage: React.FC<HomePageProps> = ({ initialModule = 'overview' }
                     {language === 'NL' ? 'Wachten op u' : 'Waiting for you'}
                   </h2>
                   <span
+                    onClick={() => hasPermission('validation') && handleNav('validation')}
+                    title={language === 'NL' ? 'Ga naar validatie' : 'Go to validation'}
                     style={{
                       fontSize: '12px',
                       fontWeight: 700,
@@ -1571,6 +1605,7 @@ export const HomePage: React.FC<HomePageProps> = ({ initialModule = 'overview' }
                       background: '#E20714',
                       color: '#FFFFFF',
                       borderRadius: '2px',
+                      cursor: hasPermission('validation') ? 'pointer' : 'default',
                     }}
                   >
                     {validationCount}
@@ -1584,72 +1619,103 @@ export const HomePage: React.FC<HomePageProps> = ({ initialModule = 'overview' }
 
                 {/* Waiting List Rows */}
                 <div style={{ display: 'flex', flexDirection: 'column' }}>
-                  {WAITING_ORDERS_DATA.map((o) => (
-                    <div
-                      key={o.nr}
-                      className="a-stag"
-                      style={{
-                        animationDelay: `${o.d}ms`,
-                        display: 'flex',
-                        flexWrap: 'wrap',
-                        alignItems: 'center',
-                        gap: '10px 16px',
-                        padding: '14px 20px',
-                        borderBottom: '1px solid #EBEBEB',
-                      }}
-                    >
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', flex: '1 1 220px', minWidth: 0 }}>
-                        <span style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-                          <span
-                            style={{
-                              fontFamily: "'IBM Plex Mono', monospace",
-                              fontSize: '13px',
-                              fontWeight: 500,
-                            }}
-                          >
-                            {o.nr}
-                          </span>
-                          <span style={{ fontWeight: 600, color: '#1A1A1A' }}>{o.klant}</span>
-                        </span>
-                        <span style={{ fontSize: '13px', color: '#4D4D4D' }}>{o.firstWhy}</span>
-                      </div>
+                  {loadingWaitingOrders && waitingOrders.length === 0 ? (
+                    <div style={{ padding: '24px 20px', textAlign: 'center', color: '#6B6B6B', fontSize: '13px' }}>
+                      {language === 'NL' ? 'Laden van wachtende orders...' : 'Loading waiting orders...'}
+                    </div>
+                  ) : waitingOrders.length === 0 ? (
+                    <div style={{ padding: '32px 20px', textAlign: 'center', color: '#6B6B6B', fontSize: '13px' }}>
+                      {language === 'NL' ? 'Geen orders die wachten op validatie' : 'No orders waiting for validation'}
+                    </div>
+                  ) : (
+                    waitingOrders.map((o, idx) => {
+                      const confVal =
+                        o.confidence != null
+                          ? Math.round(o.confidence <= 1 ? o.confidence * 100 : o.confidence)
+                          : null;
+                      const waitTxt =
+                        language === 'NL'
+                          ? (o.wait_text || '').replace('hours', 'uur').replace('min', 'min')
+                          : (o.wait_text || '');
+                      const reason =
+                        language === 'NL'
+                          ? (o.reason === 'All lines above threshold, standard inspection required.' || o.reason === 'all lines above threshold'
+                              ? 'Alle regels boven drempelwaarde, standaard controle vereist.'
+                              : o.reason === 'Inspection required before approval.'
+                              ? 'Controle vereist voor goedkeuring.'
+                              : o.reason)
+                          : o.reason;
 
-                      <ConfidenceBadge value={o.avg} threshold={70} />
-
-                      <span
-                        style={{
-                          fontSize: '13px',
-                          color: o.waitColor,
-                          fontWeight: 600,
-                          minWidth: '64px',
-                        }}
-                      >
-                        {o.waitTxt}
-                      </span>
-
-                      {hasPermission('validation') && (
-                        <button
-                          onClick={() => handleNav('validation', o.nr)}
-                          className="bd"
+                      return (
+                        <div
+                          key={o.order_id || o.order_number || idx}
+                          className="a-stag"
                           style={{
-                            minHeight: '40px',
-                            padding: '0 14px',
-                            background: '#FFFFFF',
-                            color: '#E20714',
-                            border: '1px solid #E20714',
-                            borderRadius: 0,
-                            fontWeight: 700,
-                            fontSize: '13px',
-                            textTransform: 'uppercase',
-                            letterSpacing: '0.06em',
-                            cursor: 'pointer',
+                            animationDelay: `${(idx + 1) * 70}ms`,
+                            display: 'flex',
+                            flexWrap: 'wrap',
+                            alignItems: 'center',
+                            gap: '10px 16px',
+                            padding: '14px 20px',
+                            borderBottom: '1px solid #EBEBEB',
                           }}
                         >
-                          {language === 'NL' ? 'VALIDEREN' : 'VALIDATE'}
-                        </button>
-                      )}
-                    </div>
-                  ))}
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', flex: '1 1 220px', minWidth: 0 }}>
+                            <span style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                              <span
+                                style={{
+                                  fontFamily: "'IBM Plex Mono', monospace",
+                                  fontSize: '13px',
+                                  fontWeight: 500,
+                                }}
+                              >
+                                {o.order_number}
+                              </span>
+                              <span style={{ fontWeight: 600, color: '#1A1A1A' }}>
+                                {o.customer_name || (language === 'NL' ? 'Onbekende klant' : 'Unknown customer')}
+                              </span>
+                            </span>
+                            <span style={{ fontSize: '13px', color: '#4D4D4D' }}>{reason}</span>
+                          </div>
+
+                          <ConfidenceBadge value={confVal} threshold={70} />
+
+                          <span
+                            style={{
+                              fontSize: '13px',
+                              color: o.wait_color || '#4D4D4D',
+                              fontWeight: 600,
+                              minWidth: '64px',
+                            }}
+                          >
+                            {waitTxt}
+                          </span>
+
+                          {hasPermission('validation') && (
+                            <button
+                              onClick={() => handleNav('validation', o.order_number, o.order_id, o.email_id)}
+                              className="bd"
+                              style={{
+                                minHeight: '40px',
+                                padding: '0 14px',
+                                background: '#FFFFFF',
+                                color: '#E20714',
+                                border: '1px solid #E20714',
+                                borderRadius: 0,
+                                fontWeight: 700,
+                                fontSize: '13px',
+                                textTransform: 'uppercase',
+                                letterSpacing: '0.06em',
+                                cursor: 'pointer',
+                              }}
+                            >
+                              {language === 'NL' ? 'VALIDEREN' : 'VALIDATE'}
+                            </button>
+                          )}
+                        </div>
+                      );
+                    })
+                  )}
                 </div>
 
                 {/* Lock Warning Footer */}
