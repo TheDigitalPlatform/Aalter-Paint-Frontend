@@ -12,6 +12,7 @@ import {
   type OrderDetail,
   type EmailAttachmentItem,
 } from '../../lib/ordersApi';
+import { getApiBaseUrl, getToken } from '../../lib/auth';
 import {
   INITIAL_ORDERS,
   CAT,
@@ -292,12 +293,18 @@ function mapOrderDetailToOrderItem(apiOrder: OrderDetail, isNl: boolean): OrderI
       (isNl
         ? 'Geen emailinhoud beschikbaar voor deze order.'
         : 'No email body available for this order.'),
-    att: `bestelbon_${orderNr.replace(/-/g, '_')}.pdf`,
+    att: (apiOrder as any)?.attachment_filename || (apiOrder as any)?.attachment || '',
     ocr: avg ?? 91,
-    ocrKind: isNl ? 'Gescande getypte bon' : 'Scanned typed slip',
-    ocrWhy: isNl
-      ? 'Hoge score: scan van een getypte bon, goed leesbaar'
-      : 'High score: scan of a typed slip, clearly legible',
+    ocrKind: (apiOrder as any)?.attachment_filename
+      ? (isNl ? 'Gescande getypte bon' : 'Scanned typed slip')
+      : (isNl ? 'E-mail tekst' : 'Email text'),
+    ocrWhy: (apiOrder as any)?.attachment_filename
+      ? (isNl
+          ? 'Hoge score: scan van een getypte bon, goed leesbaar'
+          : 'High score: scan of a typed slip, clearly legible')
+      : (isNl
+          ? 'Bestelling uitgelezen uit e-mail tekst'
+          : 'Order extracted from email body'),
     st,
     lines,
     rawReceivedAt: rawDate,
@@ -342,6 +349,66 @@ export function formatFileSize(bytes?: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+export function renderAttachmentIcon(filename?: string) {
+  const ext = (filename || '').split('.').pop()?.toLowerCase() || '';
+
+  if (['xlsx', 'xls', 'csv'].includes(ext)) {
+    return (
+      <svg
+        viewBox="0 0 24 24"
+        style={{ width: '20px', height: '20px', color: '#107C41', flexShrink: 0 }}
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      >
+        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+        <polyline points="14 2 14 8 20 8" />
+        <line x1="8" y1="13" x2="16" y2="13" />
+        <line x1="8" y1="17" x2="16" y2="17" />
+        <polyline points="10 9 9 9 8 9" />
+      </svg>
+    );
+  }
+
+  if (['jpg', 'jpeg', 'png', 'webp', 'bmp', 'gif', 'svg'].includes(ext)) {
+    return (
+      <svg
+        viewBox="0 0 24 24"
+        style={{ width: '20px', height: '20px', color: '#2563EB', flexShrink: 0 }}
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      >
+        <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+        <circle cx="8.5" cy="8.5" r="1.5" />
+        <polyline points="21 15 16 10 5 21" />
+      </svg>
+    );
+  }
+
+  // PDF or general document icon
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      style={{ width: '20px', height: '20px', color: '#E20714', flexShrink: 0 }}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+      <polyline points="14 2 14 8 20 8" />
+      <line x1="16" y1="13" x2="8" y2="13" />
+      <line x1="16" y1="17" x2="8" y2="17" />
+    </svg>
+  );
 }
 
 export const ValidationView: React.FC<ValidationViewProps> = ({
@@ -531,11 +598,190 @@ export const ValidationView: React.FC<ValidationViewProps> = ({
   }, [(currentOrder as any)?.email_id, (liveOrder as any)?.email_id, selectedEmailId]);
 
   const handleOpenAttachment = (att: EmailAttachmentItem) => {
-    if (!att?.file_path) {
+    const filename = att?.filename || 'attachment';
+    const ext = filename.split('.').pop()?.toLowerCase() || '';
+    const baseUrl = getApiBaseUrl();
+    const token = getToken();
+
+    let contentUrl = att?.file_path || '';
+    if (att?.id) {
+      contentUrl = `${baseUrl}/attachments/${att.id}/content${token ? `?token=${encodeURIComponent(token)}` : ''}`;
+    }
+
+    if (!contentUrl && !att?.file_path) {
       toast.error(isNl ? 'Geen bestandspad beschikbaar' : 'No file path available');
       return;
     }
-    window.open(att.file_path, '_blank', 'noopener,noreferrer');
+
+    // Synchronously open blank window to avoid popup blockers
+    const newTab = window.open('', '_blank');
+    if (!newTab) {
+      window.open(contentUrl || att.file_path, '_blank');
+      return;
+    }
+
+    // PDF: direct browser rendering
+    if (ext === 'pdf') {
+      newTab.location.href = contentUrl;
+      return;
+    }
+
+    const sanitizedName = filename.replace(/[<>&"]/g, '');
+
+    // Images: image viewer page with zoom controls and download
+    if (['jpg', 'jpeg', 'png', 'webp', 'bmp', 'gif', 'svg'].includes(ext)) {
+      newTab.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>${sanitizedName}</title><style>
+body{margin:0;background:#0f172a;color:#f8fafc;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;height:100vh;display:flex;flex-direction:column;overflow:hidden;}
+header{background:rgba(15,23,42,0.95);border-bottom:1px solid #334155;padding:12px 20px;display:flex;align-items:center;justify-content:space-between;flex-shrink:0;}
+.badge{background:#2563eb;color:#fff;font-size:11px;font-weight:700;padding:3px 8px;border-radius:4px;text-transform:uppercase;}
+.btn{background:#1e293b;color:#e2e8f0;border:1px solid #475569;padding:6px 14px;font-size:13px;border-radius:6px;cursor:pointer;text-decoration:none;display:inline-flex;align-items:center;}
+.btn-primary{background:#e20714;border-color:#e20714;color:#fff;}
+.viewport{flex:1;display:flex;align-items:center;justify-content:center;overflow:auto;padding:20px;position:relative;}
+img{max-width:100%;max-height:100%;object-fit:contain;border-radius:4px;box-shadow:0 8px 24px rgba(0,0,0,0.5);transition:transform 0.15s ease-out;}
+.controls{position:absolute;bottom:20px;left:50%;transform:translateX(-50%);background:rgba(30,41,59,0.9);border:1px solid #475569;padding:4px 8px;border-radius:20px;display:flex;gap:6px;}
+.ctrl-btn{background:transparent;border:none;color:#e2e8f0;width:28px;height:28px;border-radius:50%;cursor:pointer;font-size:16px;}
+</style></head><body>
+<header>
+  <div style="display:flex;align-items:center;gap:10px;"><span class="badge">${ext.toUpperCase()}</span><strong>${sanitizedName}</strong></div>
+  <div style="display:flex;gap:8px;"><button class="btn" onclick="window.print()">Print</button><a class="btn btn-primary" href="${contentUrl}" download="${sanitizedName}">Download</a></div>
+</header>
+<div class="viewport">
+  <img id="imgView" src="${contentUrl}" alt="${sanitizedName}"/>
+  <div class="controls">
+    <button class="ctrl-btn" onclick="zoom(-0.25)">−</button>
+    <button class="ctrl-btn" onclick="resetZoom()" style="font-size:11px;">100%</button>
+    <button class="ctrl-btn" onclick="zoom(0.25)">+</button>
+  </div>
+</div>
+<script>
+let scale = 1;
+function zoom(d){scale = Math.max(0.25, Math.min(4, scale + d)); document.getElementById('imgView').style.transform = 'scale(' + scale + ')';}
+function resetZoom(){scale = 1; document.getElementById('imgView').style.transform = 'scale(1)';}
+</script>
+</body></html>`);
+      newTab.document.close();
+      return;
+    }
+
+    // Spreadsheets: interactive Excel viewer using SheetJS
+    if (['xlsx', 'xls', 'csv'].includes(ext)) {
+      newTab.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>${sanitizedName}</title><style>
+*{box-sizing:border-box;margin:0;padding:0;}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:#f8fafc;color:#1e293b;height:100vh;display:flex;flex-direction:column;overflow:hidden;}
+header{background:#fff;border-bottom:1px solid #e2e8f0;padding:10px 20px;display:flex;align-items:center;justify-content:space-between;flex-shrink:0;box-shadow:0 1px 3px rgba(0,0,0,0.05);}
+.badge{background:#107c41;color:#fff;font-size:11px;font-weight:700;padding:4px 8px;border-radius:4px;text-transform:uppercase;}
+.search{padding:6px 12px;font-size:13px;border:1px solid #cbd5e1;border-radius:6px;outline:none;width:200px;}
+.search:focus{border-color:#107c41;}
+.btn{padding:6px 14px;font-size:13px;font-weight:500;border-radius:6px;cursor:pointer;text-decoration:none;display:inline-flex;align-items:center;border:1px solid #e2e8f0;background:#f1f5f9;color:#334155;}
+.btn-primary{background:#107c41;border-color:#107c41;color:#fff;}
+.tabs{display:flex;gap:4px;background:#f1f5f9;border-bottom:1px solid #cbd5e1;padding:6px 16px 0;flex-shrink:0;overflow-x:auto;}
+.tab{padding:6px 16px;font-size:13px;font-weight:500;color:#64748b;cursor:pointer;border:1px solid transparent;border-bottom:none;border-radius:6px 6px 0 0;background:transparent;}
+.tab.active{color:#107c41;background:#fff;border-color:#cbd5e1;border-bottom:2px solid #107c41;font-weight:600;}
+.content{flex:1;overflow:auto;padding:12px;display:flex;flex-direction:column;}
+.tbl-box{background:#fff;border:1px solid #e2e8f0;border-radius:6px;overflow:auto;flex:1;}
+table{border-collapse:collapse;width:100%;font-size:13px;font-family:monospace,"Segoe UI",Roboto,sans-serif;}
+th,td{border:1px solid #e2e8f0;padding:6px 12px;text-align:left;white-space:nowrap;}
+th{background:#f8fafc;color:#475569;font-weight:600;position:sticky;top:0;z-index:2;border-bottom:2px solid #cbd5e1;}
+th.col-letter{background:#f1f5f9;text-align:center;font-size:11px;color:#64748b;}
+td.row-idx{text-align:center;background:#f8fafc;color:#94a3b8;font-size:11px;user-select:none;position:sticky;left:0;z-index:1;width:40px;min-width:40px;}
+tr:hover td:not(.row-idx){background:#f8fafc;}
+.highlight{background:#fef08a!important;color:#854d0e;font-weight:600;}
+.msg{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;gap:12px;color:#64748b;}
+.spinner{width:36px;height:36px;border:3px solid #e2e8f0;border-top-color:#107c41;border-radius:50%;animation:spin 0.8s linear infinite;}
+@keyframes spin{to{transform:rotate(360deg);}}
+@media print{header,.tabs,.search,.btn{display:none!important;}body{overflow:visible;height:auto;}.content,.tbl-box{overflow:visible;border:none;}td.row-idx,th.col-letter{display:none;}}
+</style></head><body>
+<header>
+  <div style="display:flex;align-items:center;gap:10px;"><span class="badge">${ext.toUpperCase()}</span><strong>${sanitizedName}</strong></div>
+  <div style="display:flex;align-items:center;gap:8px;">
+    <input type="text" id="srch" class="search" placeholder="Search..." oninput="onFilter(this.value)"/>
+    <button class="btn" onclick="window.print()">Print</button>
+    <a class="btn btn-primary" href="${contentUrl}" download="${sanitizedName}">Download</a>
+  </div>
+</header>
+<div id="tabsBar" class="tabs" style="display:none;"></div>
+<div class="content">
+  <div id="loading" class="msg"><div class="spinner"></div><div>Loading ${sanitizedName}...</div></div>
+  <div id="box" class="tbl-box" style="display:none;"><table id="tbl"><thead id="th"></thead><tbody id="tb"></tbody></table></div>
+  <div id="err" class="msg" style="display:none;">
+    <p style="font-weight:600;color:#b91c1c;">Could not preview spreadsheet</p>
+    <div style="display:flex;gap:8px;"><a class="btn btn-primary" href="${contentUrl}" download="${sanitizedName}">Download ${sanitizedName}</a></div>
+  </div>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script>
+let wb=null,sheetData=[],q='';
+function colLetter(n){let l='';n++;while(n>0){let m=(n-1)%26;l=String.fromCharCode(65+m)+l;n=Math.floor((n-m)/26);}return l;}
+function showSheet(name){
+  if(!wb)return;
+  const s=wb.Sheets[name];if(!s)return;
+  document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('active',t.getAttribute('data-s')===name));
+  sheetData=window.XLSX.utils.sheet_to_json(s,{header:1,defval:''});
+  drawTable();
+}
+function drawTable(){
+  const thead=document.getElementById('th'),tbody=document.getElementById('tb');
+  thead.innerHTML='';tbody.innerHTML='';
+  if(!sheetData||sheetData.length===0){tbody.innerHTML='<tr><td style="text-align:center;padding:20px;color:#94a3b8;">(Empty Sheet)</td></tr>';return;}
+  let cols=0;sheetData.forEach(r=>{if(Array.isArray(r)&&r.length>cols)cols=r.length;});
+  if(cols===0)cols=1;
+  const htr=document.createElement('tr');
+  const c0=document.createElement('th');c0.className='col-letter';c0.textContent='#';htr.appendChild(c0);
+  for(let c=0;c<cols;c++){const th=document.createElement('th');th.className='col-letter';th.textContent=colLetter(c);htr.appendChild(th);}
+  thead.appendChild(htr);
+  const qClean=(q||'').toLowerCase().trim();
+  sheetData.forEach((row,idx)=>{
+    const arr=Array.isArray(row)?row:[];
+    const text=arr.map(x=>String(x??'')).join(' ').toLowerCase();
+    if(qClean&&!text.includes(qClean))return;
+    const tr=document.createElement('tr');
+    const idxTd=document.createElement('td');idxTd.className='row-idx';idxTd.textContent=String(idx+1);tr.appendChild(idxTd);
+    for(let c=0;c<cols;c++){
+      const td=document.createElement('td');
+      const val=arr[c]!==undefined&&arr[c]!==null?String(arr[c]):'';
+      if(qClean&&val.toLowerCase().includes(qClean)){
+        td.innerHTML=val.replace(new RegExp('('+qClean.replace(/[-\\/\\\\^$*+?.()|[\\]{}]/g,'\\\\$&')+')','gi'),'<span class="highlight">$1</span>');
+      } else { td.textContent=val; }
+      tr.appendChild(td);
+    }
+    tbody.appendChild(tr);
+  });
+}
+function onFilter(val){q=val;drawTable();}
+async function load(){
+  try{
+    const res=await fetch("${contentUrl}");
+    if(!res.ok)throw new Error("HTTP "+res.status);
+    const buf=await res.arrayBuffer();
+    let tryCount=0;
+    while(!window.XLSX&&tryCount<25){await new Promise(r=>setTimeout(r,100));tryCount++;}
+    if(!window.XLSX)throw new Error("XLSX unavailable");
+    wb=window.XLSX.read(new Uint8Array(buf),{type:'array'});
+    if(!wb||!wb.SheetNames||wb.SheetNames.length===0)throw new Error("Empty workbook");
+    const bar=document.getElementById('tabsBar');
+    bar.innerHTML='';
+    wb.SheetNames.forEach((n,i)=>{
+      const b=document.createElement('button');b.className='tab'+(i===0?' active':'');b.textContent=n;b.setAttribute('data-s',n);b.onclick=()=>showSheet(n);bar.appendChild(b);
+    });
+    bar.style.display='flex';
+    showSheet(wb.SheetNames[0]);
+    document.getElementById('loading').style.display='none';
+    document.getElementById('box').style.display='flex';
+  }catch(e){
+    console.error(e);
+    document.getElementById('loading').style.display='none';
+    document.getElementById('err').style.display='flex';
+  }
+}
+load();
+</script>
+</body></html>`);
+      newTab.document.close();
+      return;
+    }
+
+    // Fallback: direct download / view
+    newTab.location.href = contentUrl;
   };
 
   // Pending queue list
@@ -1986,10 +2232,15 @@ export const ValidationView: React.FC<ValidationViewProps> = ({
               </div>
 
               <span style={{ fontSize: '12px', color: '#6B6B6B' }}>
-                {currentOrder.ocrKind || 'Getypte PDF'} ·{' '}
-                {attachments.length > 0
-                  ? attachments.map((a) => a.filename).join(', ')
-                  : currentOrder.att}{' '}
+                {currentOrder.ocrKind || (isNl ? 'E-mail tekst' : 'Email text')}
+                {(attachments.length > 0 || currentOrder.att) ? (
+                  <>
+                    {' · '}
+                    {attachments.length > 0
+                      ? attachments.map((a) => a.filename).join(', ')
+                      : currentOrder.att}
+                  </>
+                ) : null}{' '}
                 ·{' '}
                 {isNl
                   ? 'geel = waar de AI de geselecteerde regel las'
@@ -2089,21 +2340,7 @@ export const ValidationView: React.FC<ValidationViewProps> = ({
                       }}
                     >
                       <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0 }}>
-                        {/* Red PDF Icon */}
-                        <svg
-                          viewBox="0 0 24 24"
-                          style={{ width: '20px', height: '20px', color: '#E20714', flexShrink: 0 }}
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="2"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                        >
-                          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                          <polyline points="14 2 14 8 20 8" />
-                          <line x1="16" y1="13" x2="8" y2="13" />
-                          <line x1="16" y1="17" x2="8" y2="17" />
-                        </svg>
+                        {renderAttachmentIcon(att.filename)}
                         <span
                           style={{
                             fontSize: '14px',
@@ -2153,15 +2390,7 @@ export const ValidationView: React.FC<ValidationViewProps> = ({
                     </div>
                   ))}
                 </div>
-              ) : (
-                <span style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '14px', fontWeight: 600 }}>
-                  <svg className="s" viewBox="0 0 24 24">
-                    <path d="M14 3H6a1 1 0 0 0-1 1v16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8z" />
-                    <path d="M14 3v5h5" />
-                  </svg>
-                  {currentOrder.att}
-                </span>
-              )}
+              ) : null}
 
               <span
                 style={{

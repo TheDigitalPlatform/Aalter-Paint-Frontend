@@ -11,6 +11,7 @@ export interface OrdersViewProps {
   onOpenOrder?: (orderNr: string, orderId?: number, emailId?: number) => void;
   onNavigateToExceptions?: () => void;
   mode?: 'orders' | 'validation';
+  totalCountFromSidebar?: number;
 }
 
 type SortKey = 'nr' | 'klant' | 'received' | 'conf';
@@ -118,6 +119,7 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
   onOpenOrder,
   onNavigateToExceptions,
   mode = 'orders',
+  totalCountFromSidebar,
 }) => {
   const { language: ctxLang } = useLanguage();
   const activeLang = language || ctxLang || 'NL';
@@ -138,6 +140,7 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
 
   // Live API State
   const [liveOrders, setLiveOrders] = useState<OrderListItem[] | null>(null);
+  const [liveTotal, setLiveTotal] = useState<number | null>(null);
   const [liveMailboxes, setLiveMailboxes] = useState<string[]>([]);
   const [insightsSummary, setInsightsSummary] = useState<OrderInsightsSummary | null>(null);
   const [loading, setLoading] = useState<boolean>(false);
@@ -181,6 +184,9 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
           console.log(`[OrdersView (${mode})] Live GET /api/orders data received:`, data);
           if (!isCancelled) {
             setLiveOrders(data.items || []);
+            if (typeof data.total === 'number') {
+              setLiveTotal(data.total);
+            }
             setInsightsSummary(data.insights);
             if (data.available_mailboxes && data.available_mailboxes.length > 0) {
               setLiveMailboxes((prev) => Array.from(new Set([...prev, ...data.available_mailboxes!])));
@@ -535,6 +541,25 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
     const startIndex = (page - 1) * pageSize;
     return sortedRows.slice(startIndex, startIndex + pageSize);
   }, [sortedRows, page, pageSize]);
+
+  // Dynamic live count derivation matching the sidebar
+  const isFiltered =
+    Boolean(search.trim()) ||
+    fStatus !== 'alle' ||
+    fMailbox !== 'alle' ||
+    fAttention ||
+    fLong ||
+    fUncertain;
+
+  const dynamicTotal =
+    typeof totalCountFromSidebar === 'number' && totalCountFromSidebar > 0
+      ? totalCountFromSidebar
+      : typeof liveTotal === 'number' && liveTotal > 0
+      ? liveTotal
+      : processedOrders.length;
+
+  const countToDisplay = isFiltered ? sortedRows.length : dynamicTotal;
+  const totalToDisplay = dynamicTotal;
 
   const handleSort = (key: SortKey) => {
     if (sortKey === key) {
@@ -985,8 +1010,8 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
           {/* Count indicator */}
           <span style={{ fontSize: '13px', color: '#4D4D4D' }}>
             {isNl
-              ? `${sortedRows.length} van ${processedOrders.length} orders`
-              : `${sortedRows.length} of ${processedOrders.length} orders`}
+              ? `${countToDisplay} van ${totalToDisplay} orders`
+              : `${countToDisplay} of ${totalToDisplay} orders`}
           </span>
         </div>
       </div>
@@ -1210,7 +1235,7 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
           <TablePagination
             currentPage={page}
             pageSize={pageSize}
-            totalItems={sortedRows.length}
+            totalItems={isFiltered ? sortedRows.length : totalToDisplay}
             onPageChange={setPage}
             onPageSizeChange={setPageSize}
             pageSizeOptions={[10, 25, 50]}

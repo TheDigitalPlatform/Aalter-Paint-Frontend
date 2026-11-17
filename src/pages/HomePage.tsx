@@ -1285,6 +1285,7 @@ export const HomePage: React.FC<HomePageProps> = ({ initialModule = 'overview' }
             <OrdersView
               key="view-orders"
               language={language}
+              totalCountFromSidebar={ordersCount}
               onOpenOrder={(nr, orderId, emailId) => handleNav('validation', nr, orderId, emailId)}
               onNavigateToExceptions={() => handleNav('exceptions')}
             />
@@ -1309,6 +1310,7 @@ export const HomePage: React.FC<HomePageProps> = ({ initialModule = 'overview' }
                 key="view-validation-queue"
                 mode="validation"
                 language={language}
+                totalCountFromSidebar={validationCount}
                 onOpenOrder={(nr, orderId, emailId) => {
                   setSelectedOrderNr(nr);
                   if (orderId !== undefined) setSelectedOrderId(orderId);
