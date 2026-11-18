@@ -129,6 +129,8 @@ export interface OrderDetail {
   missing_fields: string[];
   review_reasons: string[];
   extraction_confidence?: number | null;
+  confidence?: number | null;
+  ocr_confidence?: number | null;
   field_evidence?: any;
   model?: string | null;
   error_code?: string | null;

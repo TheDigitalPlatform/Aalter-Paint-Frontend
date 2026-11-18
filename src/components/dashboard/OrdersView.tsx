@@ -46,9 +46,10 @@ export function mapApiOrderToOrderItem(apiOrder: OrderListItem, isNl: boolean): 
   if (mbStr.includes('bestel')) mb = 'bestel';
   else if (mbStr.includes('persoonlijk') || mbStr.includes('personal')) mb = 'persoonlijk';
 
+  const rawConf = apiOrder.confidence ?? (apiOrder as any).extraction_confidence;
   const avg =
-    apiOrder.confidence != null
-      ? Math.round(apiOrder.confidence <= 1 ? apiOrder.confidence * 100 : apiOrder.confidence)
+    rawConf != null
+      ? Math.round(rawConf <= 1 ? rawConf * 100 : rawConf)
       : null;
 
   const stLower = (apiOrder.status || '').toLowerCase();

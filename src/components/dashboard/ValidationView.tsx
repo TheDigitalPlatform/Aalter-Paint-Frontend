@@ -12,6 +12,7 @@ import {
   fetchEmailById,
   fetchOrderContact,
   fetchEmailContact,
+  fetchValidationOrdersCount,
   type OrderDetail,
   type OrderListItem,
   type EmailAttachmentItem,
@@ -38,6 +39,7 @@ interface ValidationViewProps {
   onOrderUpdated?: (order: OrderItem) => void;
   onOrderChanged?: (orderNr: string, orderId?: number, emailId?: number) => void;
   backLabel?: string;
+  totalCountFromSidebar?: number;
 }
 
 export function resolveProductUnit(
@@ -188,9 +190,26 @@ function mapOrderDetailToOrderItem(apiOrder: OrderDetail, isNl: boolean): OrderI
   if (mbStr.includes('bestel')) mb = 'bestel';
   else if (mbStr.includes('persoonlijk') || mbStr.includes('personal')) mb = 'persoonlijk';
 
+  // Dynamic extraction / OCR confidence calculation
+  const rawConfidence =
+    apiOrder.extraction_confidence ??
+    apiOrder.confidence ??
+    (apiOrder as any).ocr_confidence;
+
+  const lineConfidences = (apiOrder.lines || [])
+    .map((l) => l.confidence)
+    .filter((c): c is number => c != null && !isNaN(c));
+
+  const lineAverage =
+    lineConfidences.length > 0
+      ? lineConfidences.reduce((sum, val) => sum + val, 0) / lineConfidences.length
+      : null;
+
+  const effectiveConfidence = rawConfidence ?? lineAverage;
+
   const avg =
-    apiOrder.confidence != null
-      ? Math.round(apiOrder.confidence <= 1 ? apiOrder.confidence * 100 : apiOrder.confidence)
+    effectiveConfidence != null
+      ? Math.round(effectiveConfidence <= 1 ? effectiveConfidence * 100 : effectiveConfidence)
       : null;
 
   const stLower = (apiOrder.status || '').toLowerCase();
@@ -311,14 +330,14 @@ function mapOrderDetailToOrderItem(apiOrder: OrderDetail, isNl: boolean): OrderI
         ? 'Geen emailinhoud beschikbaar voor deze order.'
         : 'No email body available for this order.'),
     att: (apiOrder as any)?.attachment_filename || (apiOrder as any)?.attachment || '',
-    ocr: avg ?? 91,
+    ocr: avg != null ? avg : (lineAverage != null ? Math.round(lineAverage * 100) : 85),
     ocrKind: (apiOrder as any)?.attachment_filename
       ? (isNl ? 'Gescande getypte bon' : 'Scanned typed slip')
       : (isNl ? 'E-mail tekst' : 'Email text'),
     ocrWhy: (apiOrder as any)?.attachment_filename
-      ? (isNl
-          ? 'Hoge score: scan van een getypte bon, goed leesbaar'
-          : 'High score: scan of a typed slip, clearly legible')
+      ? ((avg ?? 85) >= 70
+          ? (isNl ? 'Hoge score: scan van een getypte bon, goed leesbaar' : 'High score: scan of a typed slip, clearly legible')
+          : (isNl ? 'Lage score: controleer de gescande bon zorgvuldig' : 'Low score: please check scanned slip carefully'))
       : (isNl
           ? 'Bestelling uitgelezen uit e-mail tekst'
           : 'Order extracted from email body'),
@@ -448,11 +467,19 @@ export const ValidationView: React.FC<ValidationViewProps> = ({
   onOrderUpdated,
   onOrderChanged,
   backLabel,
+  totalCountFromSidebar,
 }) => {
   const { language: ctxLang } = useLanguage();
   const activeLang = language || ctxLang || 'NL';
   const isNl = activeLang === 'NL';
   const threshold = 70;
+
+  // Live validation queue total count (mirrors the sidebar badge)
+  const [liveQueueTotal, setLiveQueueTotal] = useState<number | null>(() => {
+    return typeof totalCountFromSidebar === 'number' && totalCountFromSidebar > 0
+      ? totalCountFromSidebar
+      : null;
+  });
 
   // Local copy of orders for interactive state
   const [orders, setOrders] = useState<OrderItem[]>(() => INITIAL_ORDERS);
@@ -464,6 +491,48 @@ export const ValidationView: React.FC<ValidationViewProps> = ({
   const [loadingAttachments, setLoadingAttachments] = useState<boolean>(false);
   const [liveContact, setLiveContact] = useState<CustomerContactInfo | null>(null);
   const [loadingContact, setLoadingContact] = useState<boolean>(false);
+
+  // Sync prop changes for totalCountFromSidebar
+  useEffect(() => {
+    if (typeof totalCountFromSidebar === 'number' && totalCountFromSidebar > 0) {
+      setLiveQueueTotal(totalCountFromSidebar);
+    }
+  }, [totalCountFromSidebar]);
+
+  // Dynamically listen for validation count updates and refresh live count from API
+  useEffect(() => {
+    let isCancelled = false;
+
+    const refreshCount = () => {
+      fetchValidationOrdersCount()
+        .then((count) => {
+          if (!isCancelled && typeof count === 'number' && count > 0) {
+            setLiveQueueTotal(count);
+          }
+        })
+        .catch(() => {});
+    };
+
+    if (liveQueueTotal === null) {
+      refreshCount();
+    }
+
+    const handleCountUpdate = (e: Event) => {
+      const customEvt = e as CustomEvent<number>;
+      if (typeof customEvt.detail === 'number' && customEvt.detail > 0) {
+        setLiveQueueTotal(customEvt.detail);
+      }
+    };
+
+    window.addEventListener('validation_count_updated', handleCountUpdate);
+    window.addEventListener('orders_refreshed', refreshCount);
+
+    return () => {
+      isCancelled = true;
+      window.removeEventListener('validation_count_updated', handleCountUpdate);
+      window.removeEventListener('orders_refreshed', refreshCount);
+    };
+  }, []);
 
   // Temporary line edits draft state (changes remain temporary until Confirm Line is clicked)
   const [lineDrafts, setLineDrafts] = useState<Record<string, {
@@ -489,9 +558,13 @@ export const ValidationView: React.FC<ValidationViewProps> = ({
   // Fetch live orders list from backend to populate orders and queueList
   useEffect(() => {
     let isCancelled = false;
-    fetchOrders({ limit: 100 })
+    fetchOrders({ status: 'validation', limit: 100 })
       .then((res) => {
         if (!isCancelled && res.items && res.items.length > 0) {
+          if (typeof res.total === 'number' && res.total > 0) {
+            setLiveQueueTotal(res.total);
+            window.dispatchEvent(new CustomEvent('validation_count_updated', { detail: res.total }));
+          }
           const liveItems: OrderItem[] = res.items.map((it) => mapApiOrderToOrderItem(it, isNl));
           setOrders((prev) => {
             const map = new Map<string, OrderItem>();
@@ -504,9 +577,10 @@ export const ValidationView: React.FC<ValidationViewProps> = ({
                 map.set(item.nr, item);
               }
             });
-            prev.forEach((item) => {
-              if (!map.has(item.nr)) map.set(item.nr, item);
-            });
+            // Keep the currently viewed order in the map if loaded
+            if (liveOrder && !map.has(liveOrder.nr)) {
+              map.set(liveOrder.nr, liveOrder);
+            }
             return Array.from(map.values());
           });
           if (!selectedOrderNr && !selectedOrderId) {
@@ -521,7 +595,7 @@ export const ValidationView: React.FC<ValidationViewProps> = ({
     return () => {
       isCancelled = true;
     };
-  }, [isNl, selectedOrderNr, selectedOrderId]);
+  }, [isNl, selectedOrderNr, selectedOrderId, liveOrder]);
 
   // Fetch live order data using GET /api/orders/{order_id} or GET /api/orders/by-email/{email_id}
   useEffect(() => {
@@ -991,6 +1065,16 @@ load();
   }, [orders]);
 
   const queueIdx = queueList.findIndex((o) => o.nr === currentOrder.nr);
+
+  const displayQueueTotal =
+    typeof liveQueueTotal === 'number' && liveQueueTotal > 0
+      ? liveQueueTotal
+      : (queueList.length > 0 ? queueList.length : 30);
+
+  const displayQueueIdx =
+    queueIdx >= 0
+      ? Math.min(queueIdx + 1, displayQueueTotal)
+      : (queueList.length > 0 ? Math.min(1, displayQueueTotal) : 1);
 
   // Wait time calculation: under 1 hour shows "min", from 1 hour shows "hour", in standard grey (never red)
   const waitInfo = useMemo(() => {
@@ -1747,13 +1831,14 @@ load();
   const totalFails = allChecksList.filter((c) => c.k === 'fail').length;
   const totalMisses = allChecksList.filter((c) => c.k === 'miss').length;
 
+  const dynamicOcrScore = currentOrder.ocr ?? (currentOrder.klantConf || 85);
   const insSummary = isNl
     ? `${linesUnderThreshold} van ${currentOrder.lines.length} regels onder de drempel · ${
         totalFails ? `${totalFails} controle mislukt` : totalMisses ? `${totalMisses} veld onzeker` : 'controles in orde'
-      } · OCR ${currentOrder.ocr || 91}%`
+      } · OCR ${dynamicOcrScore}%`
     : `${linesUnderThreshold} of ${currentOrder.lines.length} lines below threshold · ${
         totalFails ? `${totalFails} check failed` : totalMisses ? `${totalMisses} field uncertain` : 'all checks passed'
-      } · OCR ${currentOrder.ocr || 91}%`;
+      } · OCR ${dynamicOcrScore}%`;
 
   const validateEmails = (text: string) => {
     if (!text.trim()) {
@@ -1851,8 +1936,8 @@ load();
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
             <span style={{ fontSize: '13px', color: '#6B6B6B', marginRight: '4px' }}>
               {isNl
-                ? `Order ${queueIdx >= 0 ? queueIdx + 1 : 1} van ${queueList.length} in de wachtrij`
-                : `Order ${queueIdx >= 0 ? queueIdx + 1 : 1} of ${queueList.length} in the queue`}
+                ? `Order ${displayQueueIdx} van ${displayQueueTotal} in de wachtrij`
+                : `Order ${displayQueueIdx} of ${displayQueueTotal} in the queue`}
             </span>
             <button
               onClick={handlePrevOrder}
@@ -1877,7 +1962,7 @@ load();
             </button>
             <button
               onClick={handleNextOrder}
-              disabled={queueIdx >= queueList.length - 1}
+              disabled={queueIdx >= queueList.length - 1 || displayQueueIdx >= displayQueueTotal}
               aria-label="Next order"
               className="bg"
               style={{
@@ -1889,7 +1974,7 @@ load();
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                cursor: queueIdx >= queueList.length - 1 ? 'not-allowed' : 'pointer',
+                cursor: (queueIdx >= queueList.length - 1 || displayQueueIdx >= displayQueueTotal) ? 'not-allowed' : 'pointer',
               }}
             >
               <svg className="i" viewBox="0 0 24 24">
@@ -2352,7 +2437,7 @@ load();
         >
           <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             Ref. <strong style={{ color: '#1A1A1A', fontWeight: 600 }}>{currentOrder.ref}</strong>
-            <ConfidenceBadge value={98} threshold={threshold} showLabel={false} />
+            <ConfidenceBadge value={currentOrder.ocr ?? currentOrder.klantConf ?? 95} threshold={threshold} showLabel={false} />
           </span>
           <span>
             {isNl ? 'Ontvangen' : 'Received'} {currentOrder.day} {currentOrder.time}
@@ -2456,7 +2541,7 @@ load();
                 AI
               </span>
               OCR
-              <ConfidenceBadge value={currentOrder.ocr || 91} threshold={threshold} showLabel={false} />
+              <ConfidenceBadge value={currentOrder.ocr ?? (currentOrder.klantConf || 85)} threshold={threshold} showLabel={false} />
             </span>
           </div>
 
@@ -2997,7 +3082,7 @@ load();
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px', paddingTop: '2px', paddingBottom: '2px' }}>
                       <ConfidenceBadge
                         key={`conf-ocr-${currentOrder.nr}-${scanKey}`}
-                        value={currentOrder.ocr || 91}
+                        value={currentOrder.ocr ?? (currentOrder.klantConf || 85)}
                         threshold={threshold}
                         showLabel={false}
                         delay={220}

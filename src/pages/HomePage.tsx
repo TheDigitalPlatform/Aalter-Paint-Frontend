@@ -1363,6 +1363,7 @@ export const HomePage: React.FC<HomePageProps> = ({ initialModule = 'overview' }
                 selectedOrderId={selectedOrderId}
                 selectedEmailId={selectedEmailId}
                 userName={userName}
+                totalCountFromSidebar={validationCount}
                 backLabel={language === 'NL' ? 'Validatie' : 'Validation'}
                 onNavigateToOrders={() => {
                   setViewingValidationDetail(false);
