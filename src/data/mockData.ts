@@ -50,6 +50,9 @@ export interface OrderItem {
   fix?: string;
   fixWhy?: string;
   unknownCustomer?: boolean;
+  waitH?: number;
+  waitTxt?: string;
+  waitColor?: string;
 }
 
 export interface KpiTile {

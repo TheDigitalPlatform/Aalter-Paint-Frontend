@@ -95,7 +95,9 @@ function AppRoutes() {
         <Route path="/overview" element={<HomePage initialModule="overview" />} />
         <Route path="/insights" element={<HomePage initialModule="insights" />} />
         <Route path="/orders" element={<HomePage initialModule="orders" />} />
+        <Route path="/orders/:orderId" element={<HomePage initialModule="validation" />} />
         <Route path="/validation" element={<HomePage initialModule="validation" />} />
+        <Route path="/validation/:orderId" element={<HomePage initialModule="validation" />} />
         <Route path="/exceptions" element={<HomePage initialModule="exceptions" />} />
         <Route path="/institutions" element={<HomePage initialModule="institutions" />} />
         <Route path="/roles" element={<HomePage initialModule="roles" />} />

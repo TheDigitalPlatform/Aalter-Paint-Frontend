@@ -5,19 +5,24 @@ import { type Language } from '../common/LanguageToggle';
 import { TablePagination } from '../common/TablePagination';
 import { useLanguage } from '../../context/LanguageContext';
 import {
+  fetchOrders,
   fetchOrderById,
   fetchOrderByEmailId,
   updateOrderLine,
   fetchEmailById,
+  fetchOrderContact,
+  fetchEmailContact,
   type OrderDetail,
+  type OrderListItem,
   type EmailAttachmentItem,
+  type CustomerContactInfo,
 } from '../../lib/ordersApi';
+import { mapApiOrderToOrderItem } from './OrdersView';
 import { getApiBaseUrl, getToken } from '../../lib/auth';
 import {
   INITIAL_ORDERS,
+  WAITING_ORDERS_DATA,
   CAT,
-  CONTACT_DATA,
-  ADRES_DATA,
   type OrderItem,
   type OrderLine,
 } from '../../data/mockData';
@@ -31,6 +36,7 @@ interface ValidationViewProps {
   onNavigateToOrders?: () => void;
   onNavigateToExceptions?: () => void;
   onOrderUpdated?: (order: OrderItem) => void;
+  onOrderChanged?: (orderNr: string, orderId?: number, emailId?: number) => void;
   backLabel?: string;
 }
 
@@ -151,6 +157,16 @@ export function formatUnitLabel(u?: string | null, isNl = false): string {
   return u || (isNl ? 'blik' : 'can');
 }
 
+export function formatQuantity(val: string | number | null | undefined): string {
+  if (val === null || val === undefined) return '';
+  const str = String(val).trim();
+  if (str === '' || str === '??') return '';
+  const clean = str.replace(',', '.');
+  const num = parseFloat(clean);
+  if (isNaN(num)) return str;
+  return num.toFixed(2);
+}
+
 function mapOrderDetailToOrderItem(apiOrder: OrderDetail, isNl: boolean): OrderItem {
   let day = '04/11/2026';
   let time = '12:00';
@@ -188,7 +204,7 @@ function mapOrderDetailToOrderItem(apiOrder: OrderDetail, isNl: boolean): OrderI
   else if (stLower === 'failed' || stLower === 'syncfout') st = 'syncfout';
 
   let ref = apiOrder.customer_reference || '';
-  let klantNr = 'K-10289';
+  let klantNr = '';
   if (ref.includes('·')) {
     const parts = ref.split('·');
     ref = parts[0].trim();
@@ -227,6 +243,7 @@ function mapOrderDetailToOrderItem(apiOrder: OrderDetail, isNl: boolean): OrderI
     );
     const rawQtyStr = l.quantity !== null && l.quantity !== undefined ? String(l.quantity) : '';
     const numQty = rawQtyStr !== '' && !isNaN(parseFloat(rawQtyStr)) ? parseFloat(rawQtyStr) : null;
+    const formattedQtyStr = rawQtyStr !== '' ? formatQuantity(rawQtyStr) : (numQty !== null ? formatQuantity(numQty) : '');
     const dbLineId = (l as any).id || l.line_id;
     const lineNumber = l.line_number || i + 1;
 
@@ -261,7 +278,7 @@ function mapOrderDetailToOrderItem(apiOrder: OrderDetail, isNl: boolean): OrderI
       why: l.source_evidence?.reason || (l as any).field_evidence?.reason || whyText,
       want: l.source_evidence?.want || { pack },
       alts: l.source_evidence?.alts || [],
-      bonQty: rawQtyStr || (numQty != null ? String(numQty) : ''),
+      bonQty: formattedQtyStr,
       confirmed: l.status === 'confirmed' || l.status === 'approved',
       corrected: l.status === 'corrected',
       by: l.source_evidence?.by || '',
@@ -271,14 +288,14 @@ function mapOrderDetailToOrderItem(apiOrder: OrderDetail, isNl: boolean): OrderI
   return {
     nr: orderNr,
     klant: apiOrder.customer_name || (isNl ? 'Onbekende klant' : 'Unknown customer'),
-    klantNr: klantNr || 'K-10289',
+    klantNr: klantNr || '',
     klantConf: avg ?? 95,
     klantWhy: apiOrder.email_sender
       ? (isNl
           ? `Afzender ${apiOrder.email_sender} gekoppeld aan ${apiOrder.customer_name || 'klant'}`
           : `Sender ${apiOrder.email_sender} linked to ${apiOrder.customer_name || 'customer'}`)
       : '',
-    ref: ref || 'MZ-2214',
+    ref: ref || '—',
     day,
     time,
     min,
@@ -311,6 +328,15 @@ function mapOrderDetailToOrderItem(apiOrder: OrderDetail, isNl: boolean): OrderI
     outlook_status: apiOrder.outlook_status,
     order_id: apiOrder.order_id,
     email_id: apiOrder.email_id,
+    waitTxt: apiOrder.wait_text || undefined,
+    waitColor: apiOrder.wait_color || undefined,
+    waitH: apiOrder.wait_hours != null ? apiOrder.wait_hours : undefined,
+    contact_person: apiOrder.contact_info?.contact_person || null,
+    contact_role: apiOrder.contact_info?.role || null,
+    contact_email: apiOrder.contact_info?.email || apiOrder.email_sender || null,
+    contact_phone: apiOrder.contact_info?.phone || null,
+    contact_location: apiOrder.contact_info?.location || null,
+    contact_source: apiOrder.contact_info?.source || null,
   } as OrderItem;
 }
 
@@ -420,6 +446,7 @@ export const ValidationView: React.FC<ValidationViewProps> = ({
   onNavigateToOrders,
   onNavigateToExceptions,
   onOrderUpdated,
+  onOrderChanged,
   backLabel,
 }) => {
   const { language: ctxLang } = useLanguage();
@@ -435,6 +462,22 @@ export const ValidationView: React.FC<ValidationViewProps> = ({
   const [confirmingLineId, setConfirmingLineId] = useState<string | null>(null);
   const [attachments, setAttachments] = useState<EmailAttachmentItem[]>([]);
   const [loadingAttachments, setLoadingAttachments] = useState<boolean>(false);
+  const [liveContact, setLiveContact] = useState<CustomerContactInfo | null>(null);
+  const [loadingContact, setLoadingContact] = useState<boolean>(false);
+
+  // Temporary line edits draft state (changes remain temporary until Confirm Line is clicked)
+  const [lineDrafts, setLineDrafts] = useState<Record<string, {
+    qtyStr?: string;
+    unit?: string;
+    art?: string;
+    raw?: string;
+  }>>({});
+
+  // Reset line drafts and live contact when switching orders
+  useEffect(() => {
+    setLineDrafts({});
+    setLiveContact(null);
+  }, [currentNr, selectedOrderId, selectedEmailId]);
 
   // Sync prop changes
   useEffect(() => {
@@ -442,6 +485,43 @@ export const ValidationView: React.FC<ValidationViewProps> = ({
       setCurrentNr(selectedOrderNr);
     }
   }, [selectedOrderNr]);
+
+  // Fetch live orders list from backend to populate orders and queueList
+  useEffect(() => {
+    let isCancelled = false;
+    fetchOrders({ limit: 100 })
+      .then((res) => {
+        if (!isCancelled && res.items && res.items.length > 0) {
+          const liveItems: OrderItem[] = res.items.map((it) => mapApiOrderToOrderItem(it, isNl));
+          setOrders((prev) => {
+            const map = new Map<string, OrderItem>();
+            liveItems.forEach((item) => {
+              const existing = prev.find((p) => p.nr === item.nr);
+              // Preserve full line details if already present in state
+              if (existing && existing.lines && existing.lines.some((l) => Boolean(l.raw))) {
+                map.set(item.nr, existing);
+              } else {
+                map.set(item.nr, item);
+              }
+            });
+            prev.forEach((item) => {
+              if (!map.has(item.nr)) map.set(item.nr, item);
+            });
+            return Array.from(map.values());
+          });
+          if (!selectedOrderNr && !selectedOrderId) {
+            setCurrentNr((prev) => prev || liveItems[0]?.nr);
+          }
+        }
+      })
+      .catch((err) => {
+        console.warn('Failed to load live orders for queue:', err);
+      });
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [isNl, selectedOrderNr, selectedOrderId]);
 
   // Fetch live order data using GET /api/orders/{order_id} or GET /api/orders/by-email/{email_id}
   useEffect(() => {
@@ -451,29 +531,34 @@ export const ValidationView: React.FC<ValidationViewProps> = ({
       selectedOrderId !== undefined
         ? (selectedOrderId > 1000000 ? selectedOrderId % 100000 : selectedOrderId)
         : (() => {
-            if (!selectedOrderNr) return undefined;
-            const parts = selectedOrderNr.split('-');
+            const raw = currentNr || selectedOrderNr;
+            if (!raw) return undefined;
+            const parts = raw.split('-');
             const lastPart = parts[parts.length - 1];
             const parsed = parseInt(lastPart, 10);
-            return !isNaN(parsed) && parsed > 0 ? parsed : undefined;
+            return !isNaN(parsed) && parsed > 0 ? (parsed > 1000000 ? parsed % 100000 : parsed) : undefined;
           })();
+
+    const fetchTarget = orderIdToFetch !== undefined ? orderIdToFetch : (currentNr || selectedOrderNr);
 
     const mergeCachedEdits = (item: OrderItem): OrderItem => {
       try {
         const cached = sessionStorage.getItem(`order_edits_${item.nr}`);
         if (cached) {
           const parsedLines = JSON.parse(cached);
-          if (Array.isArray(parsedLines)) {
-            const mergedLines = item.lines.map((l, idx) => {
-              const match = parsedLines.find((pl: any) => pl.id === l.id) || parsedLines[idx];
+          if (Array.isArray(parsedLines) && parsedLines.length === item.lines.length) {
+            const mergedLines = item.lines.map((l) => {
+              const match = parsedLines.find((pl: any) => pl.id === l.id);
               if (match) {
                 return {
                   ...l,
                   qty: match.qty !== undefined ? match.qty : l.qty,
-                  bonQty: match.bonQty !== undefined ? match.bonQty : l.bonQty,
+                  bonQty: match.bonQty !== undefined ? formatQuantity(match.bonQty) : l.bonQty,
                   unit: match.unit || l.unit,
                   art: match.art || l.art,
+                  raw: match.raw || l.raw,
                   confirmed: match.confirmed !== undefined ? match.confirmed : l.confirmed,
+                  corrected: match.corrected !== undefined ? match.corrected : l.corrected,
                 };
               }
               return l;
@@ -485,11 +570,14 @@ export const ValidationView: React.FC<ValidationViewProps> = ({
       return item;
     };
 
-    if (orderIdToFetch !== undefined) {
+    if (fetchTarget) {
       setLoadingOrder(true);
-      fetchOrderById(orderIdToFetch)
+      fetchOrderById(fetchTarget)
         .then((orderDetail) => {
           if (!isCancelled && orderDetail) {
+            if (orderDetail.contact_info) {
+              setLiveContact(orderDetail.contact_info);
+            }
             const mapped = mergeCachedEdits(mapOrderDetailToOrderItem(orderDetail, isNl));
             setLiveOrder(mapped);
             setOrders((prev) => {
@@ -510,6 +598,9 @@ export const ValidationView: React.FC<ValidationViewProps> = ({
             fetchOrderByEmailId(selectedEmailId)
               .then((orderDetail) => {
                 if (!isCancelled && orderDetail) {
+                  if (orderDetail.contact_info) {
+                    setLiveContact(orderDetail.contact_info);
+                  }
                   const mapped = mergeCachedEdits(mapOrderDetailToOrderItem(orderDetail, isNl));
                   setLiveOrder(mapped);
                   setOrders((prev) => {
@@ -535,6 +626,9 @@ export const ValidationView: React.FC<ValidationViewProps> = ({
       fetchOrderByEmailId(selectedEmailId)
         .then((orderDetail) => {
           if (!isCancelled && orderDetail) {
+            if (orderDetail.contact_info) {
+              setLiveContact(orderDetail.contact_info);
+            }
             const mapped = mergeCachedEdits(mapOrderDetailToOrderItem(orderDetail, isNl));
             setLiveOrder(mapped);
             setOrders((prev) => {
@@ -558,11 +652,112 @@ export const ValidationView: React.FC<ValidationViewProps> = ({
     return () => {
       isCancelled = true;
     };
-  }, [selectedOrderId, selectedEmailId, selectedOrderNr, isNl]);
+  }, [currentNr, selectedOrderId, selectedEmailId, selectedOrderNr, isNl]);
+
+  // Fetch live dynamic customer contact details (email first, fallback PDF OCR)
+  useEffect(() => {
+    let isCancelled = false;
+    const targetOrderId =
+      selectedOrderId !== undefined
+        ? (selectedOrderId > 1000000 ? selectedOrderId % 100000 : selectedOrderId)
+        : (() => {
+            if (!currentNr) return undefined;
+            const parts = currentNr.split('-');
+            const lastPart = parts[parts.length - 1];
+            const parsed = parseInt(lastPart, 10);
+            return !isNaN(parsed) && parsed > 0 ? (parsed > 1000000 ? parsed % 100000 : parsed) : undefined;
+          })();
+
+    const fetchId = targetOrderId !== undefined ? targetOrderId : currentNr;
+
+    if (fetchId) {
+      setLoadingContact(true);
+      fetchOrderContact(fetchId)
+        .then((info) => {
+          if (!isCancelled && info) {
+            setLiveContact(info);
+          }
+        })
+        .catch(() => {
+          if (selectedEmailId !== undefined) {
+            fetchEmailContact(selectedEmailId)
+              .then((info) => {
+                if (!isCancelled && info) {
+                  setLiveContact(info);
+                }
+              })
+              .catch(() => {});
+          }
+        })
+        .finally(() => {
+          if (!isCancelled) setLoadingContact(false);
+        });
+    } else if (selectedEmailId !== undefined) {
+      setLoadingContact(true);
+      fetchEmailContact(selectedEmailId)
+        .then((info) => {
+          if (!isCancelled && info) {
+            setLiveContact(info);
+          }
+        })
+        .catch(() => {})
+        .finally(() => {
+          if (!isCancelled) setLoadingContact(false);
+        });
+    }
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [currentNr, selectedOrderId, selectedEmailId]);
 
   const currentOrder = useMemo(() => {
-    return orders.find((o) => o.nr === currentNr) || liveOrder || orders[2] || orders[0];
-  }, [orders, currentNr, liveOrder]);
+    // 1. If liveOrder is loaded and matches current target, always prioritize it because it has full line details
+    if (
+      liveOrder &&
+      (!currentNr ||
+        liveOrder.nr === currentNr ||
+        String((liveOrder as any).order_id) === String(currentNr) ||
+        (currentNr && currentNr.endsWith(String((liveOrder as any).order_id))))
+    ) {
+      return liveOrder;
+    }
+
+    // 2. Otherwise look in orders for an item with full line details (not summary placeholders)
+    const foundWithLines = orders.find(
+      (o) =>
+        (o.nr === currentNr ||
+          String((o as any).order_id) === String(currentNr) ||
+          (currentNr && currentNr.endsWith(String((o as any).order_id)))) &&
+        o.lines &&
+        o.lines.some((l) => Boolean(l.raw))
+    );
+    if (foundWithLines) return foundWithLines;
+
+    if (liveOrder) return liveOrder;
+
+    const found = orders.find((o) => o.nr === currentNr);
+    if (found) return found;
+
+    return orders[0];
+  }, [liveOrder, orders, currentNr]);
+
+  // Synchronize browser URL to /validation/{orderId} when viewing an order
+  useEffect(() => {
+    const activeNr = currentOrder?.nr || currentNr;
+    if (activeNr && typeof window !== 'undefined' && window.location.pathname.startsWith('/validation')) {
+      const targetPath = `/validation/${encodeURIComponent(activeNr)}`;
+      if (window.location.pathname !== targetPath) {
+        window.history.replaceState(null, '', targetPath);
+        try {
+          sessionStorage.setItem('selected_order_nr', activeNr);
+          if ((currentOrder as any)?.order_id) {
+            sessionStorage.setItem('selected_order_id', String((currentOrder as any).order_id));
+          }
+        } catch {}
+      }
+    }
+  }, [currentOrder?.nr, (currentOrder as any)?.order_id, currentNr]);
 
   // Fetch live email attachments for current order
   useEffect(() => {
@@ -797,6 +992,74 @@ load();
 
   const queueIdx = queueList.findIndex((o) => o.nr === currentOrder.nr);
 
+  // Wait time calculation: under 1 hour shows "min", from 1 hour shows "hour", in standard grey (never red)
+  const waitInfo = useMemo(() => {
+    let numVal: number | null = null;
+    let isMinutes = true;
+
+    // 1. Calculate dynamically from rawReceivedAt timestamp if available
+    const rawDate = (currentOrder as any)?.rawReceivedAt;
+    if (rawDate) {
+      try {
+        const recMs = new Date(rawDate).getTime();
+        if (!isNaN(recMs)) {
+          const diffMs = Math.max(0, Date.now() - recMs);
+          const calcHours = diffMs / 3600000;
+          if (calcHours < 1.0) {
+            numVal = Math.max(1, Math.round(calcHours * 60));
+            isMinutes = true;
+          } else {
+            numVal = Math.round(calcHours * 10) / 10;
+            isMinutes = false;
+          }
+        }
+      } catch {}
+    }
+
+    // 2. If not calculated from timestamp, check incoming text / mock data
+    if (numVal === null) {
+      let rawText: string | undefined = (currentOrder as any)?.waitTxt || (currentOrder as any)?.wait_text;
+      if (!rawText) {
+        const match = WAITING_ORDERS_DATA.find(
+          (w) =>
+            w.nr === currentOrder.nr ||
+            (currentOrder.ref && w.ref && (w.ref === currentOrder.ref || currentOrder.ref.includes(w.ref)))
+        );
+        if (match) {
+          rawText = match.waitTxt;
+        }
+      }
+
+      if (rawText) {
+        const numMatch = rawText.match(/(\d+(?:[.,]\d+)?)/);
+        if (numMatch) {
+          const parsed = parseFloat(numMatch[1].replace(',', '.'));
+          if (rawText.toLowerCase().includes('min')) {
+            numVal = parsed;
+            isMinutes = true;
+          } else {
+            numVal = parsed;
+            isMinutes = false;
+          }
+        }
+      }
+    }
+
+    // 3. Fallback for demo orders
+    if (numVal === null && currentOrder.day && currentOrder.time) {
+      numVal = 8;
+      isMinutes = true;
+    }
+
+    if (numVal === null) return null;
+
+    const unitStr = isMinutes ? 'min' : (isNl ? 'uur' : 'hour');
+    return {
+      text: `${numVal} ${unitStr}`,
+      color: '#4D4D4D', // Always standard grey (never red), exactly matching reference image
+    };
+  }, [currentOrder, isNl]);
+
   // Selected line id
   const [selLineId, setSelLineId] = useState<string | null>(null);
 
@@ -879,14 +1142,49 @@ load();
     }
   }, [selLineId, linesPageSize, currentOrder.lines]);
 
-  // Customer contact info
-  const contact = CONTACT_DATA[currentOrder.klant] || {
-    name: isNl ? 'Contactpersoon' : 'Contact person',
-    role: isNl ? 'Inkoop' : 'Purchasing',
-    phone: '+32 9 386 12 40',
-  };
+  // Customer contact info (purely dynamic from backend API extraction: email / PDF OCR)
+  const contactPerson =
+    liveContact?.contact_person ||
+    (currentOrder as any)?.contact_person ||
+    (currentOrder as any)?.contactInfo?.contact_person ||
+    null;
 
-  const address = ADRES_DATA[currentOrder.klant] || 'Lostraat 21, 9880 Aalter';
+  const rawRole =
+    liveContact?.role ||
+    (currentOrder as any)?.contact_role ||
+    (currentOrder as any)?.contactInfo?.role ||
+    null;
+
+  const contactRole = useMemo(() => {
+    if (!rawRole) return null;
+    if (!isNl) {
+      if (rawRole === 'Werfleider') return 'Site Manager';
+      if (rawRole === 'Inkoop' || rawRole === 'Aankoop') return 'Purchasing';
+      if (rawRole === 'Zaakvoerder') return 'Managing Director';
+      if (rawRole === 'Werfcoördinator') return 'Site Coordinator';
+      if (rawRole === 'Orderadministratie') return 'Order Administration';
+    }
+    return rawRole;
+  }, [rawRole, isNl]);
+
+  const contactEmail =
+    liveContact?.email ||
+    (currentOrder as any)?.contact_email ||
+    (currentOrder as any)?.contactInfo?.email ||
+    (currentOrder.from && !currentOrder.from.endsWith('@aalterpaint.be') ? currentOrder.from : null) ||
+    null;
+
+  const contactPhone =
+    liveContact?.phone ||
+    (currentOrder as any)?.contact_phone ||
+    (currentOrder as any)?.contactInfo?.phone ||
+    null;
+
+  const contactLocation =
+    liveContact?.location ||
+    (currentOrder as any)?.contact_location ||
+    (currentOrder as any)?.contactInfo?.location ||
+    null;
 
   // Mailbox full & label
   const mbFull =
@@ -939,7 +1237,10 @@ load();
       }
     });
 
-    const firstName = contact.name.split(' ')[0] || contact.name;
+    const firstName =
+      (contactPerson ? contactPerson.split(' ')[0] : '') ||
+      contactPerson ||
+      (isNl ? 'Klant' : 'Customer');
     const bodyText = isNl
       ? `Dag ${firstName},\n\nBedankt voor uw bestelling met referentie ${currentOrder.ref}.${
           questions.length
@@ -1066,48 +1367,106 @@ load();
     const targetLine = currentOrder.lines.find((l) => l.id === lineId);
     if (!targetLine) return;
 
+    const draft = lineDrafts[lineId];
+
+    // Read draft values if edited, otherwise fall back to current committed values
+    const rawQtyStr =
+      draft?.qtyStr !== undefined
+        ? draft.qtyStr
+        : (targetLine.bonQty !== undefined && targetLine.bonQty !== ''
+            ? formatQuantity(targetLine.bonQty)
+            : (targetLine.qty !== null && targetLine.qty !== undefined ? formatQuantity(targetLine.qty) : ''));
+
+    const cleanQtyStr = rawQtyStr.replace(',', '.').trim();
+    const parsedQty = cleanQtyStr !== '' && !isNaN(parseFloat(cleanQtyStr)) ? parseFloat(cleanQtyStr) : targetLine.qty;
+    const formattedQtyToCommit = parsedQty !== null && parsedQty !== undefined && !isNaN(parsedQty) ? formatQuantity(parsedQty) : rawQtyStr;
+
+    const unitToSend =
+      draft?.unit !== undefined
+        ? draft.unit
+        : (targetLine.unit || resolveProductUnit(targetLine.unit, targetLine.want?.pack || CAT[targetLine.art]?.pack, targetLine.raw, targetLine.art));
+
+    const artToSend = draft?.art !== undefined ? draft.art : targetLine.art;
+    const rawToSend = draft?.raw !== undefined ? draft.raw : targetLine.raw;
+
+    const isCorrected =
+      targetLine.corrected ||
+      (draft?.art !== undefined && draft.art !== targetLine.art) ||
+      (draft?.unit !== undefined && draft.unit !== targetLine.unit) ||
+      (draft?.qtyStr !== undefined && draft.qtyStr.trim() !== (formatQuantity(targetLine.bonQty) || formatQuantity(targetLine.qty ?? '')).trim());
+
     const orderIdToSave = getOrderIdFromOrder(currentOrder, selectedOrderId);
     const lineIdToSave = getLineIdFromLine(targetLine, lineId);
 
-    const qtyToSend =
-      targetLine.bonQty !== undefined && targetLine.bonQty !== ''
-        ? targetLine.bonQty.replace(',', '.')
-        : (targetLine.qty !== null && targetLine.qty !== undefined ? String(targetLine.qty) : undefined);
-    const unitToSend = targetLine.unit || resolveProductUnit(targetLine.unit, targetLine.want?.pack || CAT[targetLine.art]?.pack, targetLine.raw, targetLine.art);
-
+    // 1. Commit draft values to interactive state (Order Slip and lines update now)
     const updatedLines = currentOrder.lines.map((l) =>
-      l.id === lineId ? { ...l, confirmed: true, by: userName, unit: unitToSend } : l
+      l.id === lineId
+        ? {
+            ...l,
+            art: artToSend,
+            raw: rawToSend,
+            qty: parsedQty,
+            bonQty: formattedQtyToCommit,
+            unit: unitToSend,
+            confirmed: true,
+            corrected: isCorrected,
+            by: userName,
+            why: isCorrected
+              ? (isNl
+                  ? `Gewijzigd en bevestigd door ${userName}.`
+                  : `Modified and confirmed by ${userName}.`)
+              : l.why,
+          }
+        : l
     );
+
     const updatedOrder = { ...currentOrder, lines: updatedLines };
     const newOrders = orders.map((o) => (o.nr === currentOrder.nr ? updatedOrder : o));
     setOrders(newOrders);
+    setLiveOrder(updatedOrder);
     if (onOrderUpdated) onOrderUpdated(updatedOrder);
 
-    // Save in sessionStorage so page reload preserves state immediately
+    // 2. Clear draft for this line so it is now in confirmed state with no pending changes
+    setLineDrafts((prev) => {
+      const next = { ...prev };
+      delete next[lineId];
+      return next;
+    });
+
+    // 3. Save in sessionStorage so page reload preserves state immediately
     try {
       sessionStorage.setItem(`order_edits_${currentOrder.nr}`, JSON.stringify(updatedLines));
     } catch {}
 
-    // Persist confirmation, quantity and unit to backend PostgreSQL
+    // 4. Persist confirmation, quantity, unit, and article to backend PostgreSQL
     if (orderIdToSave && lineIdToSave) {
       setConfirmingLineId(lineId);
       try {
         const savedLine = await updateOrderLine(orderIdToSave, lineIdToSave, {
-          quantity: qtyToSend,
+          quantity: cleanQtyStr !== '' ? cleanQtyStr : undefined,
           unit: unitToSend,
-          product_reference: targetLine.art,
-          product_description: targetLine.raw,
+          product_reference: artToSend,
+          product_description: rawToSend,
+          match_status: isCorrected ? 'corrected' : 'confirmed',
+          status: 'confirmed',
         });
+
+        const exactLineNr =
+          savedLine?.line_number ??
+          targetLine.lineNumber ??
+          (currentOrder.lines.findIndex((l) => l.id === lineId) + 1);
 
         toast.success(
           isNl
-            ? `Regel ${lineIdToSave} opgeslagen in database`
-            : `Line ${lineIdToSave} saved in database`
+            ? `Regel ${exactLineNr} bevestigd en opgeslagen in database`
+            : `Line ${exactLineNr} confirmed and saved in database`
         );
 
         if (savedLine && savedLine.quantity !== undefined && savedLine.quantity !== null) {
-          const freshQtyStr = String(savedLine.quantity);
+          const freshQtyStr = formatQuantity(savedLine.quantity);
           const freshUnit = savedLine.unit || unitToSend;
+          const freshArt = savedLine.product_reference || artToSend;
+          const freshRaw = savedLine.product_description || rawToSend;
           const syncedLines = updatedLines.map((l) =>
             l.id === lineId
               ? {
@@ -1115,14 +1474,19 @@ load();
                   bonQty: freshQtyStr,
                   qty: parseFloat(freshQtyStr) || l.qty,
                   unit: freshUnit,
+                  art: freshArt,
+                  raw: freshRaw,
                 }
               : l
           );
           const syncedOrder = { ...currentOrder, lines: syncedLines };
           setOrders((prev) => prev.map((o) => (o.nr === currentOrder.nr ? syncedOrder : o)));
+          setLiveOrder(syncedOrder);
+          if (onOrderUpdated) onOrderUpdated(syncedOrder);
           try {
             sessionStorage.setItem(`order_edits_${currentOrder.nr}`, JSON.stringify(syncedLines));
           } catch {}
+          window.dispatchEvent(new CustomEvent('orders_refreshed'));
         }
       } catch (err: any) {
         console.warn('Failed to save confirmed line to backend:', err);
@@ -1145,48 +1509,24 @@ load();
     }
   };
 
-  // Correct line with article from search or alternatives
+  // Correct line with article from search or alternatives (held in draft until Confirm Line is clicked)
   const handlePickArticle = (lineId: string, artCode: string) => {
     const catItem = CAT[artCode];
     if (!catItem) return;
 
-    const updatedLines = currentOrder.lines.map((l) => {
-      if (l.id === lineId) {
-        const matchesBasis = catItem.basis && l.want?.basis && catItem.basis === l.want.basis;
-        const matchesPack = catItem.pack && l.want?.pack && catItem.pack === l.want.pack;
-        const newConf = matchesBasis && matchesPack ? 88 : 95;
-        return {
-          ...l,
-          art: artCode,
-          unit: catItem.unit || l.unit,
-          conf: newConf,
-          corrected: true,
-          confirmed: true,
-          by: userName,
-          why: isNl
-            ? `Gecorrigeerd door ${userName} (alternatief): ${l.art} vervangen door ${artCode}. Basis, RAL-code en verpakkingsmaat gecontroleerd.`
-            : `Corrected by ${userName} (alternative): ${l.art} replaced with ${artCode}. Base, RAL and packaging verified.`,
-        };
-      }
-      return l;
-    });
-
-    const updatedOrder = { ...currentOrder, lines: updatedLines };
-    const newOrders = orders.map((o) => (o.nr === currentOrder.nr ? updatedOrder : o));
-    setOrders(newOrders);
+    setLineDrafts((prev) => ({
+      ...prev,
+      [lineId]: {
+        ...prev[lineId],
+        art: artCode,
+        raw: catItem.d || prev[lineId]?.raw,
+        unit: catItem.unit || prev[lineId]?.unit,
+      },
+    }));
     setArtSearch('');
-    if (onOrderUpdated) onOrderUpdated(updatedOrder);
-
-    // Auto-advance to next line needing attention
-    const nextUnconfirmed = updatedLines.find(
-      (l) => l.id !== lineId && !l.confirmed && (l.conf < threshold || l.qty === null)
-    );
-    if (nextUnconfirmed) {
-      setSelLineId(nextUnconfirmed.id);
-    }
   };
 
-  // Apply RAL code
+  // Apply RAL code (held in draft until Confirm Line is clicked)
   const handleApplyRal = (lineId: string) => {
     const val = ralDraft.replace(/ral/i, '').trim();
     if (!val) return;
@@ -1199,78 +1539,40 @@ load();
       (k) => CAT[k].fam === cur.fam && CAT[k].pack === cur.pack && CAT[k].ral === val
     );
 
-    const art = match || curLine.art;
-    const ok = !!match;
-
-    const updatedLines = currentOrder.lines.map((l) => {
-      if (l.id === lineId) {
-        return {
-          ...l,
-          art,
-          unit: CAT[art]?.unit || l.unit,
-          conf: ok ? 92 : 40,
-          confirmed: ok,
-          corrected: art !== l.art,
-          by: userName,
-          why: ok
-            ? isNl
-              ? `RAL ${val} aangevuld door ${userName}. Artikel ${art} past op RAL en verpakking.`
-              : `RAL ${val} supplemented by ${userName}. Article ${art} matches RAL and packaging.`
-            : isNl
-            ? `RAL ${val} aangevuld door ${userName}, maar artikel niet gevonden.`
-            : `RAL ${val} supplemented by ${userName}, but matching article not found.`,
-        };
-      }
-      return l;
-    });
-
-    const updatedOrder = { ...currentOrder, lines: updatedLines };
-    const newOrders = orders.map((o) => (o.nr === currentOrder.nr ? updatedOrder : o));
-    setOrders(newOrders);
-    setRalDraft('');
-    if (onOrderUpdated) onOrderUpdated(updatedOrder);
-  };
-
-  // Update line quantity in interactive state
-  const handleSetQty = (lineId: string, val: string) => {
-    const num = parseFloat(val.replace(',', '.'));
-    const updatedLines = currentOrder.lines.map((l) =>
-      l.id === lineId
-        ? {
-            ...l,
-            qty: isNaN(num) ? null : num,
-            bonQty: val,
-          }
-        : l
-    );
-    const updatedOrder = { ...currentOrder, lines: updatedLines };
-    const newOrders = orders.map((o) => (o.nr === currentOrder.nr ? updatedOrder : o));
-    setOrders(newOrders);
-    if (onOrderUpdated) onOrderUpdated(updatedOrder);
-
-    // Save in sessionStorage immediately
-    try {
-      sessionStorage.setItem(`order_edits_${currentOrder.nr}`, JSON.stringify(updatedLines));
-    } catch {}
-  };
-
-  // Update line unit in interactive state
-  const handleSetUnit = (lineId: string, unitVal: string) => {
-    const targetLine = currentOrder.lines.find((l) => l.id === lineId);
-    if (targetLine && targetLine.art && CAT[targetLine.art]) {
-      CAT[targetLine.art].unit = unitVal;
+    if (match && CAT[match]) {
+      setLineDrafts((prev) => ({
+        ...prev,
+        [lineId]: {
+          ...prev[lineId],
+          art: match,
+          raw: CAT[match].d || prev[lineId]?.raw,
+          unit: CAT[match].unit || prev[lineId]?.unit,
+        },
+      }));
     }
-    const updatedLines = currentOrder.lines.map((l) =>
-      l.id === lineId ? { ...l, unit: unitVal } : l
-    );
-    const updatedOrder = { ...currentOrder, lines: updatedLines };
-    const newOrders = orders.map((o) => (o.nr === currentOrder.nr ? updatedOrder : o));
-    setOrders(newOrders);
-    if (onOrderUpdated) onOrderUpdated(updatedOrder);
+    setRalDraft('');
+  };
 
-    try {
-      sessionStorage.setItem(`order_edits_${currentOrder.nr}`, JSON.stringify(updatedLines));
-    } catch {}
+  // Update line quantity in temporary draft state (temporary until Confirm Line is clicked)
+  const handleSetQty = (lineId: string, val: string) => {
+    setLineDrafts((prev) => ({
+      ...prev,
+      [lineId]: {
+        ...prev[lineId],
+        qtyStr: val,
+      },
+    }));
+  };
+
+  // Update line unit in temporary draft state (temporary until Confirm Line is clicked)
+  const handleSetUnit = (lineId: string, unitVal: string) => {
+    setLineDrafts((prev) => ({
+      ...prev,
+      [lineId]: {
+        ...prev[lineId],
+        unit: unitVal,
+      },
+    }));
   };
 
   // Approve Order
@@ -1291,6 +1593,7 @@ load();
 
     const newOrders = orders.map((o) => (o.nr === currentOrder.nr ? updatedOrder : o));
     setOrders(newOrders);
+    setLiveOrder(updatedOrder);
     if (onOrderUpdated) onOrderUpdated(updatedOrder);
     window.dispatchEvent(new CustomEvent('orders_refreshed'));
 
@@ -1311,6 +1614,7 @@ load();
         syncAt: nowTs,
       };
       setOrders((prev) => prev.map((o) => (o.nr === currentOrder.nr ? syncedOrder : o)));
+      setLiveOrder(syncedOrder);
       setSyncResult({
         show: true,
         synced: true,
@@ -1358,6 +1662,7 @@ load();
 
     const newOrders = orders.map((o) => (o.nr === currentOrder.nr ? updatedOrder : o));
     setOrders(newOrders);
+    setLiveOrder(updatedOrder);
     setSyncResult({
       show: true,
       synced: false,
@@ -1381,13 +1686,21 @@ load();
   // Queue navigation
   const handlePrevOrder = () => {
     if (queueIdx > 0) {
-      setCurrentNr(queueList[queueIdx - 1].nr);
+      const prevOrder = queueList[queueIdx - 1];
+      setCurrentNr(prevOrder.nr);
+      if (onOrderChanged) {
+        onOrderChanged(prevOrder.nr, (prevOrder as any).order_id, (prevOrder as any).email_id);
+      }
     }
   };
 
   const handleNextOrder = () => {
     if (queueIdx < queueList.length - 1) {
-      setCurrentNr(queueList[queueIdx + 1].nr);
+      const nextOrder = queueList[queueIdx + 1];
+      setCurrentNr(nextOrder.nr);
+      if (onOrderChanged) {
+        onOrderChanged(nextOrder.nr, (nextOrder as any).order_id, (nextOrder as any).email_id);
+      }
     }
   };
 
@@ -1539,7 +1852,7 @@ load();
             <span style={{ fontSize: '13px', color: '#6B6B6B', marginRight: '4px' }}>
               {isNl
                 ? `Order ${queueIdx >= 0 ? queueIdx + 1 : 1} van ${queueList.length} in de wachtrij`
-                : `Order ${queueIdx >= 0 ? queueIdx + 1 : 1} of ${queueList.length} in queue`}
+                : `Order ${queueIdx >= 0 ? queueIdx + 1 : 1} of ${queueList.length} in the queue`}
             </span>
             <button
               onClick={handlePrevOrder}
@@ -1625,36 +1938,30 @@ load();
             display: 'flex',
             flexWrap: 'wrap',
             alignItems: 'center',
-            justifyContent: 'space-between',
-            gap: '12px 24px',
+            gap: '8px 22px',
+            fontSize: '14px',
+            color: '#1A1A1A',
             padding: '12px 0',
             borderTop: '1px solid #DADADA',
             borderBottom: '1px solid #DADADA',
           }}
         >
-          <div
-            style={{
-              display: 'flex',
-              flexWrap: 'wrap',
-              alignItems: 'center',
-              gap: '8px 22px',
-              fontSize: '14px',
-              color: '#1A1A1A',
-            }}
-          >
-            <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <span style={{ color: '#6B6B6B', display: 'flex' }}>
-                <svg className="s" viewBox="0 0 24 24">
-                  <circle cx="12" cy="8" r="4" />
-                  <path d="M4 21v-1a6 6 0 0 1 6-6h4a6 6 0 0 1 6 6v1" />
-                </svg>
-              </span>
-              <strong style={{ fontWeight: 600 }}>{contact.name}</strong>
-              <span style={{ color: '#6B6B6B' }}>{contact.role}</span>
+          {/* Person & Role */}
+          <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <span style={{ color: '#6B6B6B', display: 'flex' }}>
+              <svg className="s" viewBox="0 0 24 24">
+                <circle cx="12" cy="8" r="4" />
+                <path d="M4 21v-1a6 6 0 0 1 6-6h4a6 6 0 0 1 6 6v1" />
+              </svg>
             </span>
+            <strong style={{ fontWeight: 600 }}>{contactPerson || '—'}</strong>
+            {contactRole ? <span style={{ color: '#6B6B6B' }}>{contactRole}</span> : null}
+          </span>
 
+          {/* Email */}
+          {contactEmail ? (
             <a
-              href={`mailto:${currentOrder.from}`}
+              href={`mailto:${contactEmail}`}
               className="lk"
               style={{
                 display: 'flex',
@@ -1670,11 +1977,24 @@ load();
                   <path d="M3 7l9 6 9-6" />
                 </svg>
               </span>
-              {currentOrder.from}
+              {contactEmail}
             </a>
+          ) : (
+            <span style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#8C8C8C' }}>
+              <span style={{ color: '#6B6B6B', display: 'flex' }}>
+                <svg className="s" viewBox="0 0 24 24">
+                  <rect x="3" y="5" width="18" height="14" rx="1" />
+                  <path d="M3 7l9 6 9-6" />
+                </svg>
+              </span>
+              —
+            </span>
+          )}
 
+          {/* Phone */}
+          {contactPhone ? (
             <a
-              href={`tel:${contact.phone.replace(/\s/g, '')}`}
+              href={`tel:${contactPhone.replace(/\s/g, '')}`}
               className="lk"
               style={{
                 display: 'flex',
@@ -1689,19 +2009,31 @@ load();
                   <path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1.9.4 1.8.7 2.7a2 2 0 0 1-.5 2.1L8 9.8a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.5c.9.3 1.8.6 2.7.7a2 2 0 0 1 1.7 2z" />
                 </svg>
               </span>
-              {contact.phone}
+              {contactPhone}
             </a>
-
-            <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          ) : (
+            <span style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#8C8C8C' }}>
               <span style={{ color: '#6B6B6B', display: 'flex' }}>
                 <svg className="s" viewBox="0 0 24 24">
-                  <path d="M12 21s-7-6.1-7-11a7 7 0 0 1 14 0c0 4.9-7 11-7 11z" />
-                  <circle cx="12" cy="10" r="2.5" />
+                  <path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1.9.4 1.8.7 2.7a2 2 0 0 1-.5 2.1L8 9.8a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.5c.9.3 1.8.6 2.7.7a2 2 0 0 1 1.7 2z" />
                 </svg>
               </span>
-              {address}
+              —
             </span>
+          )}
 
+          {/* Location */}
+          <span style={{ display: 'flex', alignItems: 'center', gap: '8px', color: contactLocation ? '#1A1A1A' : '#8C8C8C' }}>
+            <span style={{ color: '#6B6B6B', display: 'flex' }}>
+              <svg className="s" viewBox="0 0 24 24">
+                <path d="M12 21s-7-6.1-7-11a7 7 0 0 1 14 0c0 4.9-7 11-7 11z" />
+                <circle cx="12" cy="10" r="2.5" />
+              </svg>
+            </span>
+            {contactLocation || '—'}
+          </span>
+
+          {currentOrder.klantNr ? (
             <span style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#4D4D4D' }}>
               BC {currentOrder.klantNr}
               <ConfidenceBadge
@@ -1710,64 +2042,76 @@ load();
                 showLabel={false}
               />
             </span>
-          </div>
+          ) : (
+            <span style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#4D4D4D' }}>
+              <ConfidenceBadge
+                value={currentOrder.klantConf}
+                threshold={threshold}
+                showLabel={false}
+              />
+            </span>
+          )}
+        </div>
 
-          {/* Mail customer & Call customer buttons */}
-          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-            <button
-              onClick={handleOpenCompose}
-              className="bd"
-              style={{
-                minHeight: '40px',
-                padding: '0 14px',
-                background: '#FFFFFF',
-                color: '#E20714',
-                border: '1px solid #E20714',
-                borderRadius: 0,
-                fontWeight: 700,
-                display: 'flex',
-                alignItems: 'center',
-                gap: '8px',
-                textTransform: 'uppercase',
-                letterSpacing: '0.06em',
-                fontSize: '12px',
-                cursor: 'pointer',
-              }}
-            >
-              <svg className="s" viewBox="0 0 24 24">
-                <rect x="3" y="5" width="18" height="14" rx="1" />
-                <path d="M3 7l9 6 9-6" />
-              </svg>
-              {isNl ? 'Mail klant' : 'Mail customer'}
-            </button>
+        {/* Mail customer & Call customer buttons */}
+        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+          <button
+            onClick={handleOpenCompose}
+            className="bd"
+            style={{
+              minHeight: '40px',
+              padding: '0 14px',
+              background: '#FFFFFF',
+              color: '#E20714',
+              border: '1px solid #E20714',
+              borderRadius: 0,
+              fontWeight: 700,
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+              textTransform: 'uppercase',
+              letterSpacing: '0.06em',
+              fontSize: '12px',
+              cursor: 'pointer',
+            }}
+          >
+            <svg className="s" viewBox="0 0 24 24">
+              <rect x="3" y="5" width="18" height="14" rx="1" />
+              <path d="M3 7l9 6 9-6" />
+            </svg>
+            {isNl ? 'EMAIL KLANT' : 'EMAIL CUSTOMER'}
+          </button>
 
-            <a
-              href={`tel:${contact.phone.replace(/\s/g, '')}`}
-              className="bg"
-              style={{
-                minHeight: '40px',
-                boxSizing: 'border-box',
-                padding: '0 14px',
-                background: '#FFFFFF',
-                color: '#1A1A1A',
-                border: '1px solid #1A1A1A',
-                borderRadius: 0,
-                fontWeight: 700,
-                display: 'flex',
-                alignItems: 'center',
-                gap: '8px',
-                textTransform: 'uppercase',
-                letterSpacing: '0.06em',
-                fontSize: '12px',
-                textDecoration: 'none',
-              }}
-            >
-              <svg className="s" viewBox="0 0 24 24">
-                <path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1.9.4 1.8.7 2.7a2 2 0 0 1-.5 2.1L8 9.8a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.5c.9.3 1.8.6 2.7.7a2 2 0 0 1 1.7 2z" />
-              </svg>
-              {isNl ? 'Bel klant' : 'Call customer'}
-            </a>
-          </div>
+          <a
+            href={contactPhone ? `tel:${contactPhone.replace(/\s/g, '')}` : undefined}
+            onClick={(e) => {
+              if (!contactPhone) e.preventDefault();
+            }}
+            className="bg"
+            style={{
+              minHeight: '40px',
+              boxSizing: 'border-box',
+              padding: '0 14px',
+              background: '#FFFFFF',
+              color: contactPhone ? '#1A1A1A' : '#8C8C8C',
+              border: `1px solid ${contactPhone ? '#1A1A1A' : '#DADADA'}`,
+              borderRadius: 0,
+              fontWeight: 700,
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+              textTransform: 'uppercase',
+              letterSpacing: '0.06em',
+              fontSize: '12px',
+              textDecoration: 'none',
+              cursor: contactPhone ? 'pointer' : 'not-allowed',
+            }}
+          >
+            <svg className="s" viewBox="0 0 24 24">
+              <path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1.9.4 1.8.7 2.7a2 2 0 0 1-.5 2.1L8 9.8a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.5c.9.3 1.8.6 2.7.7a2 2 0 0 1 1.7 2z" />
+            </svg>
+            {isNl ? 'BEL KLANT' : 'CALL CUSTOMER'}
+          </a>
         </div>
 
         {/* Inline compose mail form */}
@@ -1793,7 +2137,9 @@ load();
               }}
             >
               <span style={{ fontSize: '16px', fontWeight: 700 }}>
-                {isNl ? `Mail aan ${contact.name}` : `Email to ${contact.name}`}
+                {isNl
+                  ? (contactPerson ? `Mail aan ${contactPerson}` : 'Mail aan klant')
+                  : (contactPerson ? `Email to ${contactPerson}` : 'Email to customer')}
               </span>
               <span style={{ fontSize: '13px', color: '#6B6B6B' }}>
                 {isNl
@@ -2011,6 +2357,11 @@ load();
           <span>
             {isNl ? 'Ontvangen' : 'Received'} {currentOrder.day} {currentOrder.time}
           </span>
+          {waitInfo ? (
+            <span style={{ color: waitInfo.color, fontWeight: 500 }}>
+              {isNl ? `wacht ${waitInfo.text}` : `wait ${waitInfo.text}`}
+            </span>
+          ) : null}
           <span>{mbFull}</span>
           <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
             <span style={{ width: '8px', height: '8px', background: '#E8590C', display: 'block' }} />
@@ -2144,7 +2495,9 @@ load();
                     <span style={{ fontWeight: 700, fontSize: '18px', color: '#1E2A3A' }}>
                       {currentOrder.klant}
                     </span>
-                    <span style={{ fontSize: '12px', color: '#4D4D4D' }}>{address}</span>
+                    {contactLocation ? (
+                      <span style={{ fontSize: '12px', color: '#4D4D4D' }}>{contactLocation}</span>
+                    ) : null}
                   </div>
                   <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', textAlign: 'right' }}>
                     <span style={{ fontWeight: 700, letterSpacing: '0.12em', fontSize: '14px' }}>
@@ -2184,6 +2537,7 @@ load();
 
                   {currentOrder.lines.map((l, i) => {
                     const isSelected = selLineId === l.id;
+
                     return (
                       <button
                         key={l.id}
@@ -2210,7 +2564,7 @@ load();
                         }}
                       >
                         <span style={{ fontFamily: "'Archivo', system-ui, sans-serif", fontSize: '12px', color: '#6B6B6B' }}>
-                          {i + 1}
+                          {l.lineNumber ?? (i + 1)}
                         </span>
                         <span>{l.raw}</span>
                         <span
@@ -2219,16 +2573,18 @@ load();
                             color: l.qty === null ? '#A61B1B' : '#1E2A3A',
                           }}
                         >
-                          {l.bonQty || (l.qty !== null ? l.qty : '??')}
+                          {formatQuantity(l.bonQty ?? l.qty) || (l.qty !== null ? formatQuantity(l.qty) : '??')}
                         </span>
                       </button>
                     );
                   })}
                 </div>
 
-                <div style={{ fontSize: '13px', color: '#4D4D4D' }}>
-                  Levering: {address} · Gelieve onze referentie te vermelden op de leveringsbon.
-                </div>
+                {contactLocation ? (
+                  <div style={{ fontSize: '13px', color: '#4D4D4D' }}>
+                    Levering: {contactLocation} · Gelieve onze referentie te vermelden op de leveringsbon.
+                  </div>
+                ) : null}
               </div>
 
               <span style={{ fontSize: '12px', color: '#6B6B6B' }}>
@@ -2832,7 +3188,7 @@ load();
                       <span style={{ color: l.qty === null ? '#A61B1B' : '#1A1A1A', fontWeight: 600 }}>
                         {l.qty === null
                           ? (isNl ? 'Hoeveelheid ontbreekt' : 'Quantity missing')
-                          : `${l.bonQty || l.qty} ${formatUnitLabel(l.unit, isNl)}`}
+                          : `${formatQuantity(l.bonQty ?? l.qty) || l.qty} ${formatUnitLabel(l.unit, isNl)}`}
                       </span>
                     </span>
                   </span>
@@ -3024,234 +3380,292 @@ load();
                     </div>
 
                     {/* Line editing inputs */}
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px', alignItems: 'flex-end' }}>
-                      <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '13px', fontWeight: 600, color: '#4D4D4D' }}>
-                        {isNl ? 'Hoeveelheid' : 'Quantity'}
-                        <input
-                          type="text"
-                          inputMode="decimal"
-                          value={l.bonQty !== undefined && l.bonQty !== '' ? l.bonQty : (l.qty !== null && l.qty !== undefined ? String(l.qty) : '')}
-                          onChange={(e) => handleSetQty(l.id, e.target.value)}
-                          placeholder={isNl ? 'Aanvullen' : 'Fill in'}
-                          style={{
-                            height: '40px',
-                            width: '96px',
-                            padding: '0 10px',
-                            border: `1px solid ${l.qty === null ? '#A61B1B' : '#C9C9C9'}`,
-                            borderRadius: 0,
-                            fontSize: '15px',
-                            fontWeight: 400,
-                            background: '#FFFFFF',
-                          }}
-                        />
-                      </label>
+                    {(() => {
+                      const draft = lineDrafts[l.id];
+                      const committedQtyStr =
+                        l.bonQty !== undefined && l.bonQty !== ''
+                          ? formatQuantity(l.bonQty)
+                          : (l.qty !== null && l.qty !== undefined ? formatQuantity(l.qty) : '');
+                      const committedUnit = resolveProductUnit(l.unit, l.want?.pack || CAT[l.art]?.pack, l.raw || catItem.d, l.art);
+                      const committedArt = l.art;
 
-                      <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '13px', fontWeight: 600, color: '#4D4D4D' }}>
-                        {isNl ? 'Eenheid' : 'Unit'}
-                        <select
-                          value={resolveProductUnit(l.unit, l.want?.pack || CAT[l.art]?.pack, l.raw || catItem.d, l.art)}
-                          onChange={(e) => handleSetUnit(l.id, e.target.value)}
-                          style={{
-                            height: '40px',
-                            padding: '0 8px',
-                            border: '1px solid #C9C9C9',
-                            borderRadius: 0,
-                            fontSize: '15px',
-                            fontWeight: 400,
-                            background: '#FFFFFF',
-                            minWidth: '96px',
-                            cursor: 'pointer',
-                          }}
-                        >
-                          <option value="blik">{isNl ? 'blik' : 'can'}</option>
-                          <option value="emmer">{isNl ? 'emmer' : 'bucket'}</option>
-                          <option value="kit">kit</option>
-                          <option value="pot">pot</option>
-                          <option value="vat">{isNl ? 'vat' : 'drum'}</option>
-                          <option value="stuk">{isNl ? 'stuk' : 'piece'}</option>
-                          {(() => {
-                            const activeVal = resolveProductUnit(l.unit, l.want?.pack || CAT[l.art]?.pack, l.raw || catItem.d, l.art);
-                            if (activeVal && !['blik', 'emmer', 'kit', 'pot', 'vat', 'stuk'].includes(activeVal)) {
-                              return <option value={activeVal}>{activeVal}</option>;
-                            }
-                            return null;
-                          })()}
-                        </select>
-                      </label>
+                      const currentQtyStr = draft?.qtyStr !== undefined ? draft.qtyStr : committedQtyStr;
+                      const currentUnit = draft?.unit !== undefined ? draft.unit : committedUnit;
+                      const currentArt = draft?.art !== undefined ? draft.art : committedArt;
 
-                      {/* Optional RAL input if RAL missed */}
-                      {misses > 0 && !CAT[l.art]?.ral && (
-                        <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '13px', fontWeight: 600, color: '#4D4D4D' }}>
-                          RAL-code
-                          <span style={{ display: 'flex', gap: '6px' }}>
-                            <input
-                              type="text"
-                              value={ralDraft}
-                              onChange={(e) => setRalDraft(e.target.value)}
-                              placeholder="bv. 9010"
-                              style={{
-                                height: '40px',
-                                width: '96px',
-                                padding: '0 10px',
-                                border: '1px solid #E8590C',
-                                borderRadius: 0,
-                                fontSize: '15px',
-                                fontWeight: 400,
-                              }}
-                            />
+                      const isQtyChanged = currentQtyStr.trim() !== committedQtyStr.trim();
+                      const isUnitChanged = currentUnit !== committedUnit;
+                      const isArtChanged = currentArt !== committedArt;
+                      const hasChanges = isQtyChanged || isUnitChanged || isArtChanged;
+
+                      const cleanQtyVal = currentQtyStr.replace(',', '.').trim();
+                      const isQtyValid = cleanQtyVal !== '' && !isNaN(parseFloat(cleanQtyVal)) && parseFloat(cleanQtyVal) > 0;
+
+                      // Confirm button is disabled if:
+                      // 1. Line is already confirmed and has no new edits made
+                      // 2. Quantity is empty or invalid
+                      // 3. API save in flight
+                      const isConfirmDisabled = (l.confirmed && !hasChanges) || !isQtyValid || confirmingLineId === l.id;
+
+                      return (
+                        <>
+                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px', alignItems: 'flex-end' }}>
+                            <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '13px', fontWeight: 600, color: '#4D4D4D' }}>
+                              {isNl ? 'Hoeveelheid' : 'Quantity'}
+                              <input
+                                type="text"
+                                inputMode="decimal"
+                                value={currentQtyStr}
+                                onChange={(e) => handleSetQty(l.id, e.target.value)}
+                                placeholder={isNl ? 'Aanvullen' : 'Fill in'}
+                                style={{
+                                  height: '40px',
+                                  width: '96px',
+                                  padding: '0 10px',
+                                  border: `1px solid ${!isQtyValid ? '#A61B1B' : isQtyChanged ? '#E20714' : '#C9C9C9'}`,
+                                  borderRadius: 0,
+                                  fontSize: '15px',
+                                  fontWeight: 400,
+                                  background: '#FFFFFF',
+                                }}
+                              />
+                            </label>
+
+                            <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '13px', fontWeight: 600, color: '#4D4D4D' }}>
+                              {isNl ? 'Eenheid' : 'Unit'}
+                              <select
+                                value={currentUnit}
+                                onChange={(e) => handleSetUnit(l.id, e.target.value)}
+                                style={{
+                                  height: '40px',
+                                  padding: '0 8px',
+                                  border: `1px solid ${isUnitChanged ? '#E20714' : '#C9C9C9'}`,
+                                  borderRadius: 0,
+                                  fontSize: '15px',
+                                  fontWeight: 400,
+                                  background: '#FFFFFF',
+                                  minWidth: '96px',
+                                  cursor: 'pointer',
+                                }}
+                              >
+                                <option value="blik">{isNl ? 'blik' : 'can'}</option>
+                                <option value="emmer">{isNl ? 'emmer' : 'bucket'}</option>
+                                <option value="kit">kit</option>
+                                <option value="pot">pot</option>
+                                <option value="vat">{isNl ? 'vat' : 'drum'}</option>
+                                <option value="stuk">{isNl ? 'stuk' : 'piece'}</option>
+                                {(() => {
+                                  if (currentUnit && !['blik', 'emmer', 'kit', 'pot', 'vat', 'stuk'].includes(currentUnit)) {
+                                    return <option value={currentUnit}>{currentUnit}</option>;
+                                  }
+                                  return null;
+                                })()}
+                              </select>
+                            </label>
+
+                            {/* Optional RAL input if RAL missed */}
+                            {misses > 0 && !CAT[l.art]?.ral && (
+                              <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '13px', fontWeight: 600, color: '#4D4D4D' }}>
+                                RAL-code
+                                <span style={{ display: 'flex', gap: '6px' }}>
+                                  <input
+                                    type="text"
+                                    value={ralDraft}
+                                    onChange={(e) => setRalDraft(e.target.value)}
+                                    placeholder="bv. 9010"
+                                    style={{
+                                      height: '40px',
+                                      width: '96px',
+                                      padding: '0 10px',
+                                      border: '1px solid #E8590C',
+                                      borderRadius: 0,
+                                      fontSize: '15px',
+                                      fontWeight: 400,
+                                    }}
+                                  />
+                                  <button
+                                    onClick={() => handleApplyRal(l.id)}
+                                    className="bd"
+                                    style={{
+                                      height: '40px',
+                                      padding: '0 12px',
+                                      background: '#FFFFFF',
+                                      color: '#E20714',
+                                      border: '1px solid #E20714',
+                                      borderRadius: 0,
+                                      fontWeight: 700,
+                                      textTransform: 'uppercase',
+                                      letterSpacing: '0.06em',
+                                      fontSize: '12px',
+                                      cursor: 'pointer',
+                                    }}
+                                  >
+                                    {isNl ? 'Toepassen' : 'Apply'}
+                                  </button>
+                                </span>
+                              </label>
+                            )}
+
+                            {/* Search another article */}
+                            <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '13px', fontWeight: 600, color: '#4D4D4D', flex: '1 1 220px' }}>
+                              <span>
+                                {isNl ? 'Ander artikel zoeken' : 'Search other article'}
+                                {isArtChanged && (
+                                  <span style={{ marginLeft: '8px', fontSize: '11px', color: '#D97706', fontWeight: 700 }}>
+                                    ({isNl ? 'Concept' : 'Draft'}: {currentArt})
+                                  </span>
+                                )}
+                              </span>
+                              <span
+                                style={{
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: '8px',
+                                  height: '40px',
+                                  padding: '0 10px',
+                                  border: `1px solid ${isArtChanged ? '#E20714' : '#C9C9C9'}`,
+                                  background: '#FFFFFF',
+                                  color: '#242424',
+                                }}
+                              >
+                                <svg className="s" viewBox="0 0 24 24">
+                                  <circle cx="11" cy="11" r="7" />
+                                  <path d="M21 21l-4.35-4.35" />
+                                </svg>
+                                <input
+                                  type="search"
+                                  value={artSearch}
+                                  onChange={(e) => setArtSearch(e.target.value)}
+                                  placeholder={
+                                    isNl
+                                      ? 'Nummer, product, basis of RAL'
+                                      : 'Number, product, base or RAL'
+                                  }
+                                  style={{
+                                    border: 0,
+                                    outline: 'none',
+                                    flexGrow: 1,
+                                    minWidth: 0,
+                                    fontSize: '15px',
+                                    fontWeight: 400,
+                                    background: 'transparent',
+                                  }}
+                                />
+                              </span>
+                            </label>
+                          </div>
+
+                          {/* Search results dropdown */}
+                          {searchResults.length > 0 && (
+                            <div style={{ display: 'flex', flexDirection: 'column', border: '1px solid #DADADA', padding: '4px 10px', background: '#FFFFFF' }}>
+                              {searchResults.map((r) => (
+                                <button
+                                  key={r.art}
+                                  onClick={() => !r.blocked && handlePickArticle(l.id, r.art)}
+                                  className="row"
+                                  disabled={r.blocked}
+                                  style={{
+                                    display: 'flex',
+                                    flexWrap: 'wrap',
+                                    alignItems: 'baseline',
+                                    gap: '4px 10px',
+                                    padding: '8px 0',
+                                    border: 0,
+                                    borderBottom: '1px solid #EBEBEB',
+                                    background: 'transparent',
+                                    textAlign: 'left',
+                                    cursor: r.blocked ? 'not-allowed' : 'pointer',
+                                  }}
+                                >
+                                  <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: '13px', fontWeight: 500 }}>
+                                    {r.art}
+                                  </span>
+                                  <span style={{ fontSize: '14px' }}>{r.d}</span>
+                                  <span
+                                    style={{
+                                      fontSize: '12px',
+                                      color: r.blocked ? '#A61B1B' : '#4D4D4D',
+                                      marginLeft: 'auto',
+                                    }}
+                                  >
+                                    {r.note}
+                                  </span>
+                                </button>
+                              ))}
+                            </div>
+                          )}
+
+                          {/* Confirmation bar */}
+                          <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
+                            <span style={{ fontSize: '13px', color: '#4D4D4D' }}>
+                              {l.confirmed && !hasChanges ? (
+                                <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', color: '#15803D', fontWeight: 600 }}>
+                                  <svg style={{ width: '16px', height: '16px' }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                                    <polyline points="20 6 9 17 4 12" />
+                                  </svg>
+                                  {isNl ? `Bevestigd door ${l.by || userName}` : `Confirmed by ${l.by || userName}`}
+                                </span>
+                              ) : l.confirmed && hasChanges ? (
+                                <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', color: '#D97706', fontWeight: 600 }}>
+                                  <svg style={{ width: '16px', height: '16px' }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                                    <circle cx="12" cy="12" r="10" />
+                                    <line x1="12" y1="8" x2="12" y2="12" />
+                                    <line x1="12" y1="16" x2="12.01" y2="16" />
+                                  </svg>
+                                  {isNl ? 'Niet-opgeslagen wijzigingen (klik op bevestigen om op te slaan)' : 'Unsaved changes (click confirm to save)'}
+                                </span>
+                              ) : !isQtyValid ? (
+                                <span style={{ color: '#DC2626', fontWeight: 500 }}>
+                                  {isNl ? 'Vul eerst een geldige hoeveelheid in.' : 'Please enter a valid quantity first.'}
+                                </span>
+                              ) : (
+                                <span>
+                                  {isNl ? 'Deze regel vraagt extra aandacht: bevestig of corrigeer.' : 'This line requires attention: please confirm or correct.'}
+                                </span>
+                              )}
+                            </span>
+
                             <button
-                              onClick={() => handleApplyRal(l.id)}
+                              onClick={() => handleConfirmLine(l.id)}
+                              disabled={isConfirmDisabled}
                               className="bd"
+                              title={
+                                isConfirmDisabled && l.confirmed && !hasChanges
+                                  ? (isNl ? 'Geen wijzigingen om te bevestigen' : 'No changes to confirm')
+                                  : undefined
+                              }
                               style={{
-                                height: '40px',
-                                padding: '0 12px',
-                                background: '#FFFFFF',
-                                color: '#E20714',
-                                border: '1px solid #E20714',
+                                minHeight: '40px',
+                                padding: '0 16px',
+                                background: isConfirmDisabled ? '#F3F4F6' : '#FFFFFF',
+                                color: isConfirmDisabled ? '#9CA3AF' : '#E20714',
+                                border: `1px solid ${isConfirmDisabled ? '#E5E7EB' : '#E20714'}`,
                                 borderRadius: 0,
                                 fontWeight: 700,
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '8px',
                                 textTransform: 'uppercase',
                                 letterSpacing: '0.06em',
                                 fontSize: '12px',
-                                cursor: 'pointer',
+                                cursor: isConfirmDisabled ? 'not-allowed' : 'pointer',
+                                opacity: confirmingLineId === l.id ? 0.7 : isConfirmDisabled ? 0.75 : 1,
+                                transition: 'all 0.15s ease-in-out',
                               }}
                             >
-                              {isNl ? 'Toepassen' : 'Apply'}
+                              <svg className="s" viewBox="0 0 24 24" style={{ width: '14px', height: '14px' }}>
+                                <path d="M20 6L9 17l-5-5" />
+                              </svg>
+                              {confirmingLineId === l.id
+                                ? (isNl ? 'Opslaan...' : 'Saving...')
+                                : l.confirmed && hasChanges
+                                ? (isNl ? 'Wijzigingen bevestigen' : 'Confirm changes')
+                                : (isNl ? 'Regel bevestigen' : 'Confirm line')}
                             </button>
-                          </span>
-                        </label>
-                      )}
-
-                      {/* Search another article */}
-                      <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '13px', fontWeight: 600, color: '#4D4D4D', flex: '1 1 220px' }}>
-                        {isNl ? 'Ander artikel zoeken' : 'Search other article'}
-                        <span
-                          style={{
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: '8px',
-                            height: '40px',
-                            padding: '0 10px',
-                            border: '1px solid #C9C9C9',
-                            background: '#FFFFFF',
-                            color: '#242424',
-                          }}
-                        >
-                          <svg className="s" viewBox="0 0 24 24">
-                            <circle cx="11" cy="11" r="7" />
-                            <path d="M21 21l-4.35-4.35" />
-                          </svg>
-                          <input
-                            type="search"
-                            value={artSearch}
-                            onChange={(e) => setArtSearch(e.target.value)}
-                            placeholder={
-                              isNl
-                                ? 'Nummer, product, basis of RAL'
-                                : 'Number, product, base or RAL'
-                            }
-                            style={{
-                              border: 0,
-                              outline: 'none',
-                              flexGrow: 1,
-                              minWidth: 0,
-                              fontSize: '15px',
-                              fontWeight: 400,
-                              background: 'transparent',
-                            }}
-                          />
-                        </span>
-                      </label>
-                    </div>
-
-                    {/* Search results dropdown */}
-                    {searchResults.length > 0 && (
-                      <div style={{ display: 'flex', flexDirection: 'column', border: '1px solid #DADADA', padding: '4px 10px', background: '#FFFFFF' }}>
-                        {searchResults.map((r) => (
-                          <button
-                            key={r.art}
-                            onClick={() => !r.blocked && handlePickArticle(l.id, r.art)}
-                            className="row"
-                            disabled={r.blocked}
-                            style={{
-                              display: 'flex',
-                              flexWrap: 'wrap',
-                              alignItems: 'baseline',
-                              gap: '4px 10px',
-                              padding: '8px 0',
-                              border: 0,
-                              borderBottom: '1px solid #EBEBEB',
-                              background: 'transparent',
-                              textAlign: 'left',
-                              cursor: r.blocked ? 'not-allowed' : 'pointer',
-                            }}
-                          >
-                            <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: '13px', fontWeight: 500 }}>
-                              {r.art}
-                            </span>
-                            <span style={{ fontSize: '14px' }}>{r.d}</span>
-                            <span
-                              style={{
-                                fontSize: '12px',
-                                color: r.blocked ? '#A61B1B' : '#4D4D4D',
-                                marginLeft: 'auto',
-                              }}
-                            >
-                              {r.note}
-                            </span>
-                          </button>
-                        ))}
-                      </div>
-                    )}
-
-                    {/* Confirmation bar */}
-                    <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
-                      <span style={{ fontSize: '13px', color: '#4D4D4D' }}>
-                        {l.confirmed
-                          ? isNl
-                            ? `Bevestigd door ${l.by || userName}`
-                            : `Confirmed by ${l.by || userName}`
-                          : l.qty === null
-                          ? isNl
-                            ? 'Vul eerst de hoeveelheid aan.'
-                            : 'Please fill in quantity first.'
-                          : isNl
-                          ? 'Deze regel vraagt extra aandacht: bevestig of corrigeer.'
-                          : 'This line requires attention: please confirm or correct.'}
-                      </span>
-
-                      {!l.confirmed && (
-                        <button
-                          onClick={() => handleConfirmLine(l.id)}
-                          disabled={l.qty === null || confirmingLineId === l.id}
-                          className="bd"
-                          style={{
-                            minHeight: '40px',
-                            padding: '0 14px',
-                            background: '#FFFFFF',
-                            color: '#E20714',
-                            border: '1px solid #E20714',
-                            borderRadius: 0,
-                            fontWeight: 700,
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: '8px',
-                            textTransform: 'uppercase',
-                            letterSpacing: '0.06em',
-                            fontSize: '12px',
-                            cursor: l.qty === null || confirmingLineId === l.id ? 'not-allowed' : 'pointer',
-                            opacity: confirmingLineId === l.id ? 0.7 : 1,
-                          }}
-                        >
-                          <svg className="s" viewBox="0 0 24 24">
-                            <path d="M20 6L9 17l-5-5" />
-                          </svg>
-                          {confirmingLineId === l.id
-                            ? (isNl ? 'Opslaan...' : 'Saving...')
-                            : (isNl ? 'Regel bevestigen' : 'Confirm line')}
-                        </button>
-                      )}
-                    </div>
+                          </div>
+                        </>
+                      );
+                    })()}
                   </div>
                 )}
               </div>

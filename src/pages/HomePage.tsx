@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { useNavigate, useLocation } from 'react-router-dom';
+import { useNavigate, useLocation, useParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useLanguage } from '../context/LanguageContext';
 import { ConfidenceBadge } from '../components/common/ConfidenceBadge';
@@ -46,7 +46,16 @@ export const HomePage: React.FC<HomePageProps> = ({ initialModule = 'overview' }
   } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
+  const { orderId: routeOrderId } = useParams<{ orderId?: string }>();
   const { language, setLanguage } = useLanguage();
+
+  const getUrlOrderId = (): string | undefined => {
+    if (routeOrderId) return routeOrderId;
+    const match = window.location.pathname.match(/\/(?:validation|orders)\/([^/?#]+)/i);
+    return match ? decodeURIComponent(match[1]) : undefined;
+  };
+
+  const initialOrderIdParam = getUrlOrderId();
 
   // Dynamically synchronize live profile and role on dashboard mount
   useEffect(() => {
@@ -74,8 +83,9 @@ export const HomePage: React.FC<HomePageProps> = ({ initialModule = 'overview' }
     if (p.includes('/audit')) return 'audit';
     if (p.includes('/learning')) return 'learning';
     if (p.includes('/insights')) return 'insights';
-    if (p.includes('/orders')) return 'orders';
     if (p.includes('/validation')) return 'validation';
+    if (p.includes('/orders/') && p.match(/\/orders\/[^/?#]+/)) return 'validation';
+    if (p.includes('/orders')) return 'orders';
     if (p.includes('/exceptions')) return 'exceptions';
     if (p.includes('/institutions')) return 'institutions';
     if (p.includes('/roles')) return 'roles';
@@ -84,6 +94,7 @@ export const HomePage: React.FC<HomePageProps> = ({ initialModule = 'overview' }
 
   const [activeModule, setActiveModule] = useState<ActiveModule>(() => getModuleFromPath(location.pathname));
   const [selectedOrderNr, setSelectedOrderNr] = useState<string>(() => {
+    if (initialOrderIdParam) return initialOrderIdParam;
     try {
       return sessionStorage.getItem('selected_order_nr') || 'AP-26-04819';
     } catch {
@@ -91,6 +102,16 @@ export const HomePage: React.FC<HomePageProps> = ({ initialModule = 'overview' }
     }
   });
   const [selectedOrderId, setSelectedOrderId] = useState<number | undefined>(() => {
+    if (initialOrderIdParam) {
+      if (initialOrderIdParam.includes('-')) {
+        const parts = initialOrderIdParam.split('-');
+        const parsed = parseInt(parts[parts.length - 1], 10);
+        if (!isNaN(parsed) && parsed > 0) return parsed;
+      } else {
+        const parsed = parseInt(initialOrderIdParam, 10);
+        if (!isNaN(parsed) && parsed > 0) return parsed;
+      }
+    }
     try {
       const val = sessionStorage.getItem('selected_order_id');
       return val ? parseInt(val, 10) : undefined;
@@ -129,7 +150,11 @@ export const HomePage: React.FC<HomePageProps> = ({ initialModule = 'overview' }
     }
   });
 
-  const [viewingValidationDetail, setViewingValidationDetail] = useState<boolean>(false);
+  const [viewingValidationDetail, setViewingValidationDetail] = useState<boolean>(() => {
+    const rawId = initialOrderIdParam;
+    const p = window.location.pathname.toLowerCase();
+    return Boolean(rawId && (p.includes('/validation') || p.includes('/orders/')));
+  });
   const [waitingOrders, setWaitingOrders] = useState<WaitingOrderItem[]>([]);
   const [loadingWaitingOrders, setLoadingWaitingOrders] = useState<boolean>(true);
 
@@ -519,10 +544,41 @@ export const HomePage: React.FC<HomePageProps> = ({ initialModule = 'overview' }
   useEffect(() => {
     const mod = getModuleFromPath(location.pathname);
     setActiveModule(mod);
-    if (mod !== 'validation') {
+
+    const match = location.pathname.match(/\/(?:validation|orders)\/([^/?#]+)/i);
+    const rawId = routeOrderId || (match ? decodeURIComponent(match[1]) : undefined);
+
+    if (mod === 'validation') {
+      if (rawId) {
+        setViewingValidationDetail(true);
+        setSelectedOrderNr(rawId);
+        try {
+          sessionStorage.setItem('selected_order_nr', rawId);
+        } catch {}
+
+        let parsedId: number | undefined;
+        if (rawId.includes('-')) {
+          const parts = rawId.split('-');
+          const last = parseInt(parts[parts.length - 1], 10);
+          if (!isNaN(last) && last > 0) parsedId = last;
+        } else {
+          const num = parseInt(rawId, 10);
+          if (!isNaN(num) && num > 0) parsedId = num;
+        }
+
+        if (parsedId !== undefined) {
+          setSelectedOrderId(parsedId);
+          try {
+            sessionStorage.setItem('selected_order_id', String(parsedId));
+          } catch {}
+        }
+      } else {
+        setViewingValidationDetail(false);
+      }
+    } else {
       setViewingValidationDetail(false);
     }
-  }, [location.pathname, initialModule]);
+  }, [location.pathname, routeOrderId, initialModule]);
 
   const handleNav = (mod: ActiveModule, orderNr?: string, orderId?: number, emailId?: number) => {
     if (mod !== 'profile' && !hasPermission(mod)) {
@@ -559,7 +615,16 @@ export const HomePage: React.FC<HomePageProps> = ({ initialModule = 'overview' }
       } catch { }
     }
     setActiveModule(mod);
-    navigate('/' + mod);
+    if (mod === 'validation') {
+      const targetIdentifier = orderNr || (orderId !== undefined ? String(orderId) : '');
+      if (targetIdentifier) {
+        navigate(`/validation/${encodeURIComponent(targetIdentifier)}`);
+      } else {
+        navigate('/validation');
+      }
+    } else {
+      navigate('/' + mod);
+    }
   };
 
   const markAllRead = () => {
@@ -1301,7 +1366,21 @@ export const HomePage: React.FC<HomePageProps> = ({ initialModule = 'overview' }
                 backLabel={language === 'NL' ? 'Validatie' : 'Validation'}
                 onNavigateToOrders={() => {
                   setViewingValidationDetail(false);
-                  handleNav('validation');
+                  navigate('/validation');
+                }}
+                onOrderChanged={(orderNr, orderId, emailId) => {
+                  setSelectedOrderNr(orderNr);
+                  if (orderId !== undefined) setSelectedOrderId(orderId);
+                  if (emailId !== undefined) setSelectedEmailId(emailId);
+                  try {
+                    sessionStorage.setItem('selected_order_nr', orderNr);
+                    if (orderId !== undefined) sessionStorage.setItem('selected_order_id', String(orderId));
+                    if (emailId !== undefined) sessionStorage.setItem('selected_email_id', String(emailId));
+                  } catch {}
+                  const targetId = orderNr || (orderId !== undefined ? String(orderId) : '');
+                  if (targetId) {
+                    navigate(`/validation/${encodeURIComponent(targetId)}`, { replace: true });
+                  }
                 }}
                 onNavigateToExceptions={() => handleNav('exceptions')}
               />

@@ -26,7 +26,7 @@ function formatMailboxOptionLabel(mailbox: string, isNl: boolean): string {
   return clean;
 }
 
-function mapApiOrderToOrderItem(apiOrder: OrderListItem, isNl: boolean): OrderItem {
+export function mapApiOrderToOrderItem(apiOrder: OrderListItem, isNl: boolean): OrderItem {
   let day = '';
   let time = '';
   let min = 0;
@@ -75,10 +75,10 @@ function mapApiOrderToOrderItem(apiOrder: OrderListItem, isNl: boolean): OrderIt
   return {
     nr: apiOrder.order_number || `AP-26-${String(apiOrder.order_id).padStart(5, '0')}`,
     klant: apiOrder.customer_name || (isNl ? 'Onbekende klant' : 'Unknown customer'),
-    klantNr: klantNr || 'K-10289',
+    klantNr: klantNr || '',
     klantConf: avg ?? 95,
     klantWhy: '',
-    ref: ref || 'MZ-2214',
+    ref: ref || '',
     day,
     time,
     min,
@@ -1143,7 +1143,7 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
               <span style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
                 <span style={{ fontWeight: 600, color: '#1A1A1A' }}>{o.klant}</span>
                 <span style={{ fontSize: '13px', color: '#4D4D4D' }}>
-                  {o.ref} · {o.klantNr}
+                  {[o.ref && o.ref !== '—' ? o.ref : null, o.klantNr || null].filter(Boolean).join(' · ') || '—'}
                 </span>
               </span>
 

@@ -89,6 +89,15 @@ export async function fetchOrders(params: FetchOrdersParams = {}): Promise<Order
   return json.data;
 }
 
+export interface CustomerContactInfo {
+  contact_person?: string | null;
+  role?: string | null;
+  email?: string | null;
+  phone?: string | null;
+  location?: string | null;
+  source?: Record<string, string>;
+}
+
 export interface OrderLineDetail {
   id?: number;
   order_id?: number;
@@ -99,11 +108,13 @@ export interface OrderLineDetail {
   unit?: string | null;
   packaging?: string | null;
   notes?: string | null;
-  missing_fields: string[];
   confidence?: number | null;
-  field_evidence?: any;
-  created_at?: string | null;
-  updated_at?: string | null;
+  status?: string | null;
+  match_status?: string | null;
+  item_code?: string | null;
+  description?: string | null;
+  unit_of_measure?: string | null;
+  source_evidence?: any;
 }
 
 export interface OrderDetail {
@@ -129,6 +140,10 @@ export interface OrderDetail {
   email_subject?: string | null;
   email_body?: string | null;
   outlook_status?: string | null;
+  contact_info?: CustomerContactInfo | null;
+  wait_hours?: number | null;
+  wait_text?: string | null;
+  wait_color?: string | null;
   created_at?: string | null;
   updated_at?: string | null;
 }
@@ -173,6 +188,46 @@ export async function fetchOrderByEmailId(emailId: number | string): Promise<Ord
   return json.data;
 }
 
+export async function fetchOrderContact(orderId: number | string): Promise<CustomerContactInfo> {
+  const baseUrl = getApiBaseUrl();
+  const response = await fetch(`${baseUrl}/orders/${orderId}/contact`, {
+    method: 'GET',
+    headers: getAuthHeaders(),
+  });
+
+  if (response.status === 401) {
+    handleUnauthorizedSession();
+    throw new Error('Unauthorized');
+  }
+
+  const json = await response.json();
+  if (!response.ok || !json.success) {
+    throw new Error(json.message || `Failed to fetch contact details for order ${orderId}`);
+  }
+
+  return json.data;
+}
+
+export async function fetchEmailContact(emailId: number | string): Promise<CustomerContactInfo> {
+  const baseUrl = getApiBaseUrl();
+  const response = await fetch(`${baseUrl}/orders/by-email/${emailId}/contact`, {
+    method: 'GET',
+    headers: getAuthHeaders(),
+  });
+
+  if (response.status === 401) {
+    handleUnauthorizedSession();
+    throw new Error('Unauthorized');
+  }
+
+  const json = await response.json();
+  if (!response.ok || !json.success) {
+    throw new Error(json.message || `Failed to fetch contact details for email ${emailId}`);
+  }
+
+  return json.data;
+}
+
 export interface UpdateOrderLinePayload {
   quantity?: number | string | null;
   unit?: string | null;
@@ -180,6 +235,8 @@ export interface UpdateOrderLinePayload {
   product_description?: string | null;
   packaging?: string | null;
   confidence?: number | null;
+  match_status?: string | null;
+  status?: string | null;
 }
 
 export async function updateOrderLine(
@@ -358,10 +415,3 @@ export async function fetchWaitingForYouOrders(limit: number = 10): Promise<Wait
 
   return json.data;
 }
-
-
-
-
-
-
-
