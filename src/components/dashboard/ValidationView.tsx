@@ -389,6 +389,15 @@ export function getLineIdFromLine(line?: OrderLine | null, fallbackLineIdStr?: s
   return undefined;
 }
 
+export function isImageAttachment(att?: EmailAttachmentItem | null): boolean {
+  if (!att) return false;
+  if (att.content_type && att.content_type.toLowerCase().startsWith('image/')) {
+    return true;
+  }
+  const ext = (att.filename || '').split('.').pop()?.toLowerCase() || '';
+  return ['jpg', 'jpeg', 'png', 'webp', 'bmp', 'gif', 'svg', 'ico', 'tiff', 'tif'].includes(ext);
+}
+
 export function formatFileSize(bytes?: number): string {
   if (!bytes || isNaN(bytes)) return '';
   if (bytes < 1024) return `${bytes} B`;
@@ -850,7 +859,10 @@ export const ValidationView: React.FC<ValidationViewProps> = ({
     fetchEmailById(activeEmailId)
       .then((emailData) => {
         if (!isCancelled && emailData?.attachments) {
-          setAttachments(Array.isArray(emailData.attachments) ? emailData.attachments : []);
+          const rawAttachments = Array.isArray(emailData.attachments) ? emailData.attachments : [];
+          // Filter out image attachments (png, jpg, jpeg, etc.) so only documents (pdf, xlsx, etc.) are shown
+          const docAttachments = rawAttachments.filter((att) => !isImageAttachment(att));
+          setAttachments(docAttachments);
         }
       })
       .catch((err) => {
@@ -2674,11 +2686,11 @@ load();
 
               <span style={{ fontSize: '12px', color: '#6B6B6B' }}>
                 {currentOrder.ocrKind || (isNl ? 'E-mail tekst' : 'Email text')}
-                {(attachments.length > 0 || currentOrder.att) ? (
+                {(attachments.filter((att) => !isImageAttachment(att)).length > 0 || currentOrder.att) ? (
                   <>
                     {' · '}
-                    {attachments.length > 0
-                      ? attachments.map((a) => a.filename).join(', ')
+                    {attachments.filter((att) => !isImageAttachment(att)).length > 0
+                      ? attachments.filter((att) => !isImageAttachment(att)).map((a) => a.filename).join(', ')
                       : currentOrder.att}
                   </>
                 ) : null}{' '}
@@ -2745,9 +2757,9 @@ load();
                   />
                   {isNl ? 'Bijlagen laden...' : 'Loading attachments...'}
                 </div>
-              ) : attachments.length > 0 ? (
+              ) : attachments.filter((att) => !isImageAttachment(att)).length > 0 ? (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '4px' }}>
-                  {attachments.map((att, idx) => (
+                  {attachments.filter((att) => !isImageAttachment(att)).map((att, idx) => (
                     <div
                       key={att.id || `${att.filename}-${idx}`}
                       onClick={() => handleOpenAttachment(att)}

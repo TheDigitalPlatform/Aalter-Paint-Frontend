@@ -158,13 +158,11 @@ export const HomePage: React.FC<HomePageProps> = ({ initialModule = 'overview' }
   const [waitingOrders, setWaitingOrders] = useState<WaitingOrderItem[]>([]);
   const [loadingWaitingOrders, setLoadingWaitingOrders] = useState<boolean>(true);
 
-  // Dynamically load live order & validation counts and top waiting orders for the Overview page
+  // Dynamically load live sidebar order & validation counts
   useEffect(() => {
     let isCancelled = false;
 
-    const loadLiveCounts = async () => {
-      console.log(`[Auto-Reload 1 min] ${new Date().toLocaleTimeString()} - Calling /api/orders/count, /api/orders/validation/count, and /api/orders/waiting-for-you...`);
-
+    const loadSidebarCounts = async () => {
       try {
         const total = await fetchOrdersCount();
         if (!isCancelled && typeof total === 'number') {
@@ -174,7 +172,7 @@ export const HomePage: React.FC<HomePageProps> = ({ initialModule = 'overview' }
           } catch {}
         }
       } catch (err) {
-        console.warn('[Auto-Reload 1 min] fetchOrdersCount failed:', err);
+        console.warn('fetchOrdersCount failed:', err);
       }
 
       try {
@@ -186,34 +184,15 @@ export const HomePage: React.FC<HomePageProps> = ({ initialModule = 'overview' }
           } catch {}
         }
       } catch (err) {
-        console.warn('[Auto-Reload 1 min] fetchValidationOrdersCount failed:', err);
-      }
-
-      try {
-        const waitingData = await fetchWaitingForYouOrders(10);
-        if (!isCancelled && waitingData) {
-          setWaitingOrders(waitingData.items || []);
-          if (typeof waitingData.total_waiting === 'number') {
-            setValidationCount(waitingData.total_waiting);
-            try {
-              sessionStorage.setItem('live_validation_total', String(waitingData.total_waiting));
-            } catch {}
-          }
-        }
-      } catch (err) {
-        console.warn('[Auto-Reload 1 min] fetchWaitingForYouOrders failed:', err);
-      } finally {
-        if (!isCancelled) {
-          setLoadingWaitingOrders(false);
-        }
+        console.warn('fetchValidationOrdersCount failed:', err);
       }
     };
 
-    loadLiveCounts();
+    loadSidebarCounts();
 
-    // Auto-reload every 1 minute (60,000 ms) for counts and waiting orders
+    // Auto-reload every 1 minute (60,000 ms) for sidebar counts
     const intervalId = setInterval(() => {
-      loadLiveCounts();
+      loadSidebarCounts();
     }, 60000);
 
     // Immediate reactive update whenever OrdersView fetches orders
@@ -235,23 +214,65 @@ export const HomePage: React.FC<HomePageProps> = ({ initialModule = 'overview' }
           sessionStorage.setItem('live_validation_total', String(customEvt.detail));
         } catch {}
       }
-      loadLiveCounts();
+    };
+
+    let lastFocusTime = 0;
+    const handleFocus = () => {
+      const now = Date.now();
+      // Cooldown of 30 seconds to prevent spam when clicking between DevTools and browser
+      if (now - lastFocusTime > 30000) {
+        lastFocusTime = now;
+        loadSidebarCounts();
+      }
     };
 
     window.addEventListener('orders_count_updated', handleOrdersCountEvent);
     window.addEventListener('validation_count_updated', handleValidationCountEvent);
-    window.addEventListener('orders_refreshed', loadLiveCounts);
-    window.addEventListener('focus', loadLiveCounts);
+    window.addEventListener('orders_refreshed', loadSidebarCounts);
+    window.addEventListener('focus', handleFocus);
 
     return () => {
       isCancelled = true;
       clearInterval(intervalId);
       window.removeEventListener('orders_count_updated', handleOrdersCountEvent);
       window.removeEventListener('validation_count_updated', handleValidationCountEvent);
-      window.removeEventListener('orders_refreshed', loadLiveCounts);
-      window.removeEventListener('focus', loadLiveCounts);
+      window.removeEventListener('orders_refreshed', loadSidebarCounts);
+      window.removeEventListener('focus', handleFocus);
     };
   }, []);
+
+  // Dynamically load top waiting orders ONLY when on the overview module
+  useEffect(() => {
+    if (activeModule !== 'overview') return;
+
+    let isCancelled = false;
+    setLoadingWaitingOrders(true);
+
+    fetchWaitingForYouOrders(10)
+      .then((waitingData) => {
+        if (!isCancelled && waitingData) {
+          setWaitingOrders(waitingData.items || []);
+          if (typeof waitingData.total_waiting === 'number') {
+            setValidationCount(waitingData.total_waiting);
+            try {
+              sessionStorage.setItem('live_validation_total', String(waitingData.total_waiting));
+            } catch {}
+          }
+        }
+      })
+      .catch((err) => {
+        console.warn('fetchWaitingForYouOrders failed:', err);
+      })
+      .finally(() => {
+        if (!isCancelled) {
+          setLoadingWaitingOrders(false);
+        }
+      });
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [activeModule]);
 
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(() => {
     try {
