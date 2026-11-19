@@ -13,6 +13,9 @@ import {
   fetchOrderContact,
   fetchEmailContact,
   fetchValidationOrdersCount,
+  fetchCustomerEmailDraft,
+  sendCustomerEmail,
+  fetchCustomerEmailHistory,
   type OrderDetail,
   type OrderListItem,
   type EmailAttachmentItem,
@@ -1167,10 +1170,14 @@ load();
 
   // Mail compose dialog state (with CC, BCC and validation warning)
   const [composeOpen, setComposeOpen] = useState(false);
+  const [cTo, setCTo] = useState('');
   const [cSubject, setCSubject] = useState('');
   const [cBody, setCBody] = useState('');
   const [cCc, setCCc] = useState('');
   const [cBcc, setCBcc] = useState('');
+  const [composeHint, setComposeHint] = useState('');
+  const [isDraftLoading, setIsDraftLoading] = useState(false);
+  const [isSendingEmail, setIsSendingEmail] = useState(false);
   const [emailWarning, setEmailWarning] = useState('');
 
   // Comment for approve / reject
@@ -1299,8 +1306,36 @@ load();
         : 'Personal'
       : 'info@';
 
-  // Pre-fill compose mail body when opened
-  const handleOpenCompose = () => {
+  // Pre-fill compose mail body when opened (with backend draft API integration)
+  const handleOpenCompose = async () => {
+    setComposeOpen(true);
+    setIsDraftLoading(true);
+
+    const orderIdentifier = (currentOrder as any)?.order_id || currentOrder.nr;
+
+    try {
+      if (orderIdentifier) {
+        const draft = await fetchCustomerEmailDraft(orderIdentifier);
+        setCTo(draft.to && draft.to.length ? draft.to.join(', ') : (currentOrder.from || ''));
+        setCCc(draft.cc && draft.cc.length ? draft.cc.join(', ') : '');
+        setCBcc(draft.bcc && draft.bcc.length ? draft.bcc.join(', ') : '');
+        setCSubject(draft.subject || `Re: ${currentOrder.subject} (${currentOrder.ref})`);
+        setCBody(draft.body_text || '');
+        setComposeHint(
+          draft.hint ||
+            (isNl
+              ? `Verstuurd vanuit ${mbFull}, als antwoord op de bronmail`
+              : `Sent from ${mbFull}, replying to source email`)
+        );
+        setIsDraftLoading(false);
+        return;
+      }
+    } catch (err: any) {
+      console.warn('Could not load backend draft, falling back to local template:', err);
+    } finally {
+      setIsDraftLoading(false);
+    }
+
     const questions: string[] = [];
     currentOrder.lines.forEach((l, i) => {
       const ask: string[] = [];
@@ -1353,9 +1388,90 @@ load();
             : ' We will process it today.'
         }\n\nBest regards,\n${userName}\nAalterpaint`;
 
+    setCTo(currentOrder.from || '');
     setCSubject(`Re: ${currentOrder.subject} (${currentOrder.ref})`);
     setCBody(bodyText);
-    setComposeOpen(true);
+    setComposeHint(
+      isNl
+        ? `Verstuurd vanuit ${mbFull}, als antwoord op de bronmail`
+        : `Sent from ${mbFull}, replying to source email`
+    );
+  };
+
+  // Send customer email reply via backend POST .../send
+  const handleSendCustomerEmail = async () => {
+    const targetTo = cTo.trim() || currentOrder.from || '';
+    if (!targetTo) {
+      toast.error(isNl ? 'Vul minstens één ontvanger in (Aan)' : 'Please enter at least one recipient (To)');
+      return;
+    }
+    if (!cSubject.trim()) {
+      toast.error(isNl ? 'Onderwerp mag niet leeg zijn' : 'Subject cannot be empty');
+      return;
+    }
+    if (!cBody.trim()) {
+      toast.error(isNl ? 'Bericht mag niet leeg zijn' : 'Message cannot be empty');
+      return;
+    }
+
+    const orderIdentifier = (currentOrder as any)?.order_id || currentOrder.nr;
+    if (!orderIdentifier) {
+      toast.error(isNl ? 'Geen order-ID gevonden' : 'No order ID found');
+      return;
+    }
+
+    setIsSendingEmail(true);
+    try {
+      const res = await sendCustomerEmail(orderIdentifier, {
+        to: targetTo,
+        cc: cCc.trim() ? cCc : undefined,
+        bcc: cBcc.trim() ? cBcc : undefined,
+        subject: cSubject.trim(),
+        body_text: cBody.trim(),
+      });
+      toast.success(
+        isNl
+          ? `E-mail verzonden naar n8n wachtrij (#${res.outbound_id})`
+          : `Customer email queued successfully (#${res.outbound_id})`
+      );
+      setComposeOpen(false);
+    } catch (err: any) {
+      console.error('Error sending customer email:', err);
+      const code = err.code;
+      if (code === 'CUSTOMER_EMAIL_IN_FLIGHT') {
+        const confirmForce = window.confirm(
+          isNl
+            ? 'Er staat al een e-mail in behandeling voor deze order. Wilt u dit toch forceren?'
+            : 'An email is already in-flight for this order. Do you want to force send anyway?'
+        );
+        if (confirmForce) {
+          try {
+            const res = await sendCustomerEmail(orderIdentifier, {
+              to: targetTo,
+              cc: cCc.trim() ? cCc : undefined,
+              bcc: cBcc.trim() ? cBcc : undefined,
+              subject: cSubject.trim(),
+              body_text: cBody.trim(),
+              force: true,
+            });
+            toast.success(
+              isNl
+                ? `E-mail geforceerd verzonden (#${res.outbound_id})`
+                : `Email force-queued successfully (#${res.outbound_id})`
+            );
+            setComposeOpen(false);
+            return;
+          } catch (retryErr: any) {
+            toast.error(retryErr.message || 'Failed to force send email');
+            return;
+          }
+        }
+      } else {
+        toast.error(err.message || (isNl ? 'Kon e-mail niet verzenden' : 'Failed to send email'));
+      }
+    } finally {
+      setIsSendingEmail(false);
+    }
   };
 
   // Line checks computation
@@ -2239,11 +2355,17 @@ load();
                   : (contactPerson ? `Email to ${contactPerson}` : 'Email to customer')}
               </span>
               <span style={{ fontSize: '13px', color: '#6B6B6B' }}>
-                {isNl
+                {composeHint || (isNl
                   ? `Verstuurd vanuit ${mbFull}, als antwoord op de bronmail`
-                  : `Sent from ${mbFull}, replying to source email`}
+                  : `Sent from ${mbFull}, replying to source email`)}
               </span>
             </div>
+
+            {isDraftLoading && (
+              <div style={{ fontSize: '13px', color: '#6B6B6B', fontStyle: 'italic', padding: '2px 0' }}>
+                {isNl ? 'Concept ophalen van server...' : 'Fetching draft from server...'}
+              </div>
+            )}
 
             <div
               style={{
@@ -2254,8 +2376,29 @@ load();
                 fontSize: '14px',
               }}
             >
-              <span style={{ color: '#6B6B6B' }}>{isNl ? 'Aan' : 'To'}</span>
-              <span style={{ fontWeight: 600 }}>{currentOrder.from}</span>
+              <label htmlFor="cmp-to" style={{ color: '#6B6B6B' }}>
+                {isNl ? 'Aan' : 'To'}
+              </label>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                <input
+                  id="cmp-to"
+                  type="text"
+                  value={cTo}
+                  onChange={(e) => {
+                    setCTo(e.target.value);
+                    validateEmails(e.target.value);
+                  }}
+                  placeholder="klant@bedrijf.be"
+                  style={{
+                    height: '40px',
+                    padding: '0 10px',
+                    border: '1px solid #C9C9C9',
+                    borderRadius: 0,
+                    fontSize: '15px',
+                    background: '#FFFFFF',
+                  }}
+                />
+              </div>
 
               {/* CC Field with helper */}
               <label htmlFor="cmp-cc" style={{ color: '#6B6B6B' }}>
@@ -2390,6 +2533,7 @@ load();
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', flexWrap: 'wrap' }}>
               <button
                 onClick={() => setComposeOpen(false)}
+                disabled={isSendingEmail}
                 className="bg"
                 style={{
                   minHeight: '44px',
@@ -2401,19 +2545,20 @@ load();
                   textTransform: 'uppercase',
                   letterSpacing: '0.06em',
                   fontSize: '13px',
-                  cursor: 'pointer',
+                  cursor: isSendingEmail ? 'not-allowed' : 'pointer',
                 }}
               >
                 {isNl ? 'Annuleren' : 'Cancel'}
               </button>
               <button
-                onClick={() => setComposeOpen(false)}
+                onClick={handleSendCustomerEmail}
+                disabled={isSendingEmail || isDraftLoading}
                 className="bp"
                 style={{
                   minHeight: '44px',
                   padding: '0 18px',
                   border: 0,
-                  background: '#E20714',
+                  background: isSendingEmail || isDraftLoading ? '#8C8C8C' : '#E20714',
                   color: '#FFFFFF',
                   borderRadius: 0,
                   fontWeight: 700,
@@ -2423,14 +2568,16 @@ load();
                   textTransform: 'uppercase',
                   letterSpacing: '0.06em',
                   fontSize: '13px',
-                  cursor: 'pointer',
+                  cursor: isSendingEmail || isDraftLoading ? 'not-allowed' : 'pointer',
                 }}
               >
                 <svg className="s" viewBox="0 0 24 24">
                   <rect x="3" y="5" width="18" height="14" rx="1" />
                   <path d="M3 7l9 6 9-6" />
                 </svg>
-                {isNl ? 'Verzenden' : 'Send'}
+                {isSendingEmail
+                  ? (isNl ? 'Verzenden...' : 'Sending...')
+                  : (isNl ? 'Verzenden' : 'Send')}
               </button>
             </div>
           </div>

@@ -417,3 +417,164 @@ export async function fetchWaitingForYouOrders(limit: number = 10): Promise<Wait
 
   return json.data;
 }
+
+// ---------------------------------------------------------------------------
+// Customer Email Reply (F12) APIs
+// ---------------------------------------------------------------------------
+
+export interface CustomerEmailDraftData {
+  order_id: number;
+  order_number: string;
+  email_id: number;
+  mailbox: string;
+  source_message_id: string;
+  source_subject?: string | null;
+  source_sender?: string | null;
+  contact_person?: string | null;
+  to: string[];
+  cc: string[];
+  bcc: string[];
+  subject: string;
+  body_text: string;
+  hint: string;
+}
+
+export interface SendCustomerEmailPayload {
+  to: string | string[];
+  cc?: string | string[];
+  bcc?: string | string[];
+  subject: string;
+  body_text: string;
+  body_html?: string | null;
+  force?: boolean;
+}
+
+export interface CustomerEmailSendResult {
+  outbound_id: number;
+  order_id: number;
+  order_number: string;
+  email_id: number;
+  mailbox: string;
+  source_message_id: string;
+  status: string;
+  to: string[];
+  cc: string[];
+  bcc: string[];
+  subject: string;
+}
+
+export interface CustomerEmailOutboundItem {
+  id: number;
+  order_id: number;
+  email_id: number;
+  mailbox: string;
+  source_message_id: string;
+  source_internet_message_id?: string | null;
+  source_conversation_id?: string | null;
+  to_recipients: string[];
+  cc_recipients: string[];
+  bcc_recipients: string[];
+  subject: string;
+  body_text: string;
+  body_html?: string | null;
+  status: string;
+  provider_message_id?: string | null;
+  error_message?: string | null;
+  requested_by_user_id?: number | null;
+  n8n_execution_id?: string | null;
+  queued_at?: string | null;
+  sent_at?: string | null;
+  failed_at?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+}
+
+export async function fetchCustomerEmailDraft(
+  orderId: string | number
+): Promise<CustomerEmailDraftData> {
+  const baseUrl = getApiBaseUrl();
+  const response = await fetch(
+    `${baseUrl}/orders/${encodeURIComponent(orderId)}/customer-email/draft`,
+    {
+      method: 'GET',
+      headers: getAuthHeaders(),
+    }
+  );
+
+  if (response.status === 401) {
+    handleUnauthorizedSession();
+    throw new Error('Unauthorized');
+  }
+
+  const json = await response.json();
+  if (!response.ok || !json.success) {
+    const errorMsg =
+      json.message || json.error?.message || json.error?.details || 'Failed to fetch customer email draft';
+    const err = new Error(errorMsg);
+    (err as any).code = json.error?.code;
+    throw err;
+  }
+
+  return json.data;
+}
+
+export async function sendCustomerEmail(
+  orderId: string | number,
+  payload: SendCustomerEmailPayload
+): Promise<CustomerEmailSendResult> {
+  const baseUrl = getApiBaseUrl();
+  const response = await fetch(
+    `${baseUrl}/orders/${encodeURIComponent(orderId)}/customer-email/send`,
+    {
+      method: 'POST',
+      headers: {
+        ...getAuthHeaders(),
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    }
+  );
+
+  if (response.status === 401) {
+    handleUnauthorizedSession();
+    throw new Error('Unauthorized');
+  }
+
+  const json = await response.json();
+  if (!response.ok || !json.success) {
+    const errorMsg =
+      json.message || json.error?.message || json.error?.details || 'Failed to send customer email';
+    const err = new Error(errorMsg);
+    (err as any).code = json.error?.code;
+    throw err;
+  }
+
+  return json.data;
+}
+
+export async function fetchCustomerEmailHistory(
+  orderId: string | number
+): Promise<CustomerEmailOutboundItem[]> {
+  const baseUrl = getApiBaseUrl();
+  const response = await fetch(
+    `${baseUrl}/orders/${encodeURIComponent(orderId)}/customer-email`,
+    {
+      method: 'GET',
+      headers: getAuthHeaders(),
+    }
+  );
+
+  if (response.status === 401) {
+    handleUnauthorizedSession();
+    throw new Error('Unauthorized');
+  }
+
+  const json = await response.json();
+  if (!response.ok || !json.success) {
+    throw new Error(
+      json.message || json.error?.message || json.error?.details || 'Failed to fetch customer email history'
+    );
+  }
+
+  return json.data;
+}
