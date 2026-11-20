@@ -45,6 +45,8 @@ export interface FetchOrdersParams {
   uncertain_only?: boolean;
   skip?: number;
   limit?: number;
+  sort_by?: string;
+  sort_order?: string;
 }
 
 export async function fetchOrders(params: FetchOrdersParams = {}): Promise<OrderListResponseData> {
@@ -69,6 +71,8 @@ export async function fetchOrders(params: FetchOrdersParams = {}): Promise<Order
   }
   if (params.skip !== undefined) query.append('skip', String(params.skip));
   if (params.limit !== undefined) query.append('limit', String(params.limit));
+  if (params.sort_by) query.append('sort_by', params.sort_by);
+  if (params.sort_order) query.append('sort_order', params.sort_order);
 
   const url = `${baseUrl}/orders${query.toString() ? `?${query.toString()}` : ''}`;
   const response = await fetch(url, {

@@ -181,9 +181,20 @@ function mapOrderDetailToOrderItem(apiOrder: OrderDetail, isNl: boolean): OrderI
     try {
       const d = new Date(rawDate);
       if (!isNaN(d.getTime())) {
-        day = `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`;
-        time = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
-        min = d.getHours() * 60 + d.getMinutes();
+        day = d.toLocaleDateString(isNl ? 'nl-BE' : 'en-GB', {
+          day: '2-digit',
+          month: '2-digit',
+          year: 'numeric',
+          timeZone: 'Europe/Brussels',
+        });
+        time = d.toLocaleTimeString(isNl ? 'nl-BE' : 'en-GB', {
+          hour: '2-digit',
+          minute: '2-digit',
+          hour12: false,
+          timeZone: 'Europe/Brussels',
+        });
+        const bParts = time.split(':');
+        min = (Number(bParts[0]) || 0) * 60 + (Number(bParts[1]) || 0);
       }
     } catch {}
   }
@@ -1792,7 +1803,12 @@ load();
     if (hasBlockers || isSyncing) return;
 
     setIsSyncing(true);
-    const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const timeStr = new Date().toLocaleTimeString(isNl ? 'nl-BE' : 'en-GB', {
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+      timeZone: 'Europe/Brussels',
+    });
     const nowTs = `${currentOrder.day || '08/10/2026'} ${timeStr}`;
 
     const updatedOrder: OrderItem = {
@@ -1861,7 +1877,12 @@ load();
       return;
     }
 
-    const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const timeStr = new Date().toLocaleTimeString(isNl ? 'nl-BE' : 'en-GB', {
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+      timeZone: 'Europe/Brussels',
+    });
     const nowTs = `${currentOrder.day || '08/10/2026'} ${timeStr}`;
 
     const updatedOrder: OrderItem = {

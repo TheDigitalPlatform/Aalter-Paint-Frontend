@@ -30,15 +30,25 @@ export function mapApiOrderToOrderItem(apiOrder: OrderListItem, isNl: boolean): 
   let day = '';
   let time = '';
   let min = 0;
-  if (apiOrder.received_at) {
-    const d = new Date(apiOrder.received_at);
-    day = d.toLocaleDateString(isNl ? 'nl-BE' : 'en-GB', {
-      day: '2-digit',
-      month: '2-digit',
-      year: 'numeric',
-    });
-    time = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    min = d.getHours() * 60 + d.getMinutes();
+  const rawDate = apiOrder.received_at || apiOrder.created_at;
+  if (rawDate) {
+    const d = new Date(rawDate);
+    if (!isNaN(d.getTime())) {
+      day = d.toLocaleDateString(isNl ? 'nl-BE' : 'en-GB', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+        timeZone: 'Europe/Brussels',
+      });
+      time = d.toLocaleTimeString(isNl ? 'nl-BE' : 'en-GB', {
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false,
+        timeZone: 'Europe/Brussels',
+      });
+      const bParts = time.split(':');
+      min = (Number(bParts[0]) || 0) * 60 + (Number(bParts[1]) || 0);
+    }
   }
 
   let mb: 'info' | 'bestel' | 'persoonlijk' = 'info';
@@ -180,6 +190,7 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
         extra_attention: fAttention ? true : undefined,
         waiting_longer_than_4_hours: fLong ? true : undefined,
         uncertain_only: fUncertain ? true : undefined,
+        limit: 100,
       })
         .then((data) => {
           console.log(`[OrdersView (${mode})] Live GET /api/orders data received:`, data);
@@ -510,11 +521,43 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
     const list = [...filteredRows];
     const dir = sortDir === 'asc' ? 1 : -1;
 
+    const getOrderReceivedTimestamp = (item: OrderItem): number => {
+      if (item.rawReceivedAt) {
+        const ms = new Date(item.rawReceivedAt).getTime();
+        if (!isNaN(ms)) return ms;
+      }
+      if (item.day) {
+        const parts = item.day.split(/[/-]/);
+        if (parts.length === 3) {
+          let d = 1, m = 1, y = 2026;
+          if (parts[0].length === 4) {
+            y = Number(parts[0]);
+            m = Number(parts[1]);
+            d = Number(parts[2]);
+          } else {
+            d = Number(parts[0]);
+            m = Number(parts[1]);
+            y = Number(parts[2]);
+          }
+          const [hhStr, mmStr] = (item.time || '00:00').split(':');
+          const parsed = new Date(y, m - 1, d, Number(hhStr) || 0, Number(mmStr) || 0).getTime();
+          if (!isNaN(parsed)) return parsed;
+        }
+      }
+      return typeof item.min === 'number' ? item.min : 0;
+    };
+
     list.sort((a, b) => {
       let va: any, vb: any;
       if (sortKey === 'received') {
-        va = a.min;
-        vb = b.min;
+        const ta = getOrderReceivedTimestamp(a);
+        const tb = getOrderReceivedTimestamp(b);
+        if (ta !== tb) {
+          return ta < tb ? -dir : dir;
+        }
+        const idA = a.order_id || 0;
+        const idB = b.order_id || 0;
+        return idA < idB ? -dir : idA > idB ? dir : 0;
       } else if (sortKey === 'conf') {
         va = a.avg === null ? -1 : a.avg;
         vb = b.avg === null ? -1 : b.avg;
