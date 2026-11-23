@@ -359,10 +359,23 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         </div>
 
         {/* 3 Mailboxes Grid */}
+        <style>{`
+          .settings-mailboxes-grid {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 12px;
+          }
+          @media (max-width: 860px) {
+            .settings-mailboxes-grid {
+              grid-template-columns: 1fr !important;
+            }
+          }
+        `}</style>
         <div
+          className="settings-mailboxes-grid"
           style={{
             display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(min(280px, 100%), 1fr))',
+            gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
             gap: '12px',
           }}
         >

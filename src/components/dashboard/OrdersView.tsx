@@ -154,7 +154,7 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
   const [liveTotal, setLiveTotal] = useState<number | null>(null);
   const [liveMailboxes, setLiveMailboxes] = useState<string[]>([]);
   const [insightsSummary, setInsightsSummary] = useState<OrderInsightsSummary | null>(null);
-  const [loading, setLoading] = useState<boolean>(false);
+  const [, setLoading] = useState<boolean>(false);
 
   const threshold = 70;
 
@@ -521,7 +521,7 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
     const list = [...filteredRows];
     const dir = sortDir === 'asc' ? 1 : -1;
 
-    const getOrderReceivedTimestamp = (item: OrderItem): number => {
+    const getOrderReceivedTimestamp = (item: any): number => {
       if (item.rawReceivedAt) {
         const ms = new Date(item.rawReceivedAt).getTime();
         if (!isNaN(ms)) return ms;
@@ -555,8 +555,8 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
         if (ta !== tb) {
           return ta < tb ? -dir : dir;
         }
-        const idA = a.order_id || 0;
-        const idB = b.order_id || 0;
+        const idA = (a as any).order_id || 0;
+        const idB = (b as any).order_id || 0;
         return idA < idB ? -dir : idA > idB ? dir : 0;
       } else if (sortKey === 'conf') {
         va = a.avg === null ? -1 : a.avg;
@@ -710,7 +710,24 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
   ];
 
   return (
-    <div key={`orders-view-${mode}`} className="a-in" style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+    <div key={`orders-view-${mode}`} className="a-in" style={{ display: 'flex', flexDirection: 'column', gap: '24px', width: '100%' }}>
+      <style>{`
+        .compact-insights-grid {
+          display: grid;
+          grid-template-columns: repeat(4, minmax(0, 1fr));
+          gap: 12px;
+        }
+        @media (max-width: 960px) {
+          .compact-insights-grid {
+            grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+          }
+        }
+        @media (max-width: 520px) {
+          .compact-insights-grid {
+            grid-template-columns: 1fr !important;
+          }
+        }
+      `}</style>
       {/* Title Header */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
         <h1
@@ -780,10 +797,11 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
         </div>
 
         <div
+          className="compact-insights-grid"
           style={{
             display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(min(210px, 100%), 1fr))',
-            gap: '10px',
+            gridTemplateColumns: 'repeat(4, minmax(0, 1fr))',
+            gap: '12px',
           }}
         >
           {compactInsights.map((c) => (
@@ -847,7 +865,8 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
             display: 'flex',
             flexWrap: 'wrap',
             alignItems: 'flex-end',
-            gap: '12px',
+            gap: '12px 16px',
+            width: '100%',
           }}
         >
           {/* Search */}
@@ -856,9 +875,8 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
               display: 'flex',
               flexDirection: 'column',
               gap: '4px',
-              width: '240px',
-              maxWidth: '240px',
-              flex: '0 0 240px',
+              flex: '2.5 1 240px',
+              minWidth: '200px',
               fontSize: '13px',
               fontWeight: 600,
             }}
@@ -874,6 +892,8 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
                 border: '1px solid #C9C9C9',
                 background: '#FFFFFF',
                 borderRadius: 0,
+                width: '100%',
+                boxSizing: 'border-box',
               }}
             >
               <svg className="i" viewBox="0 0 24 24">
@@ -903,7 +923,7 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
           </label>
 
           {/* Status */}
-          <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '13px', fontWeight: 600 }}>
+          <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '13px', fontWeight: 600, flex: '1.2 1 170px', minWidth: '150px' }}>
             Status
             <select
               value={fStatus}
@@ -912,14 +932,15 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
                 setFUncertain(false);
               }}
               style={{
+                width: '100%',
                 height: '44px',
                 padding: '0 10px',
                 border: '1px solid #C9C9C9',
                 background: '#FFFFFF',
                 fontSize: '15px',
                 fontWeight: 400,
-                minWidth: '190px',
                 borderRadius: 0,
+                boxSizing: 'border-box',
               }}
             >
               <option value="alle">{isNl ? 'Alle statussen' : 'All statuses'}</option>
@@ -944,20 +965,21 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
           </label>
 
           {/* Mailbox */}
-          <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '13px', fontWeight: 600 }}>
+          <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '13px', fontWeight: 600, flex: '1.2 1 160px', minWidth: '140px' }}>
             Mailbox
             <select
               value={fMailbox}
               onChange={(e) => setFMailbox(e.target.value)}
               style={{
+                width: '100%',
                 height: '44px',
                 padding: '0 10px',
                 border: '1px solid #C9C9C9',
                 background: '#FFFFFF',
                 fontSize: '15px',
                 fontWeight: 400,
-                minWidth: '160px',
                 borderRadius: 0,
+                boxSizing: 'border-box',
               }}
             >
               <option value="alle">{isNl ? 'Alle mailboxen' : 'All mailboxes'}</option>
@@ -969,57 +991,72 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
             </select>
           </label>
 
-          {/* Only extra attention */}
-          <label
+          {/* Checkboxes Wrapper */}
+          <div
             style={{
               display: 'flex',
               alignItems: 'center',
-              gap: '8px',
+              gap: '16px',
               height: '44px',
-              fontSize: '14px',
-              fontWeight: 600,
-              cursor: 'pointer',
+              flex: '0 0 auto',
             }}
           >
-            <input
-              type="checkbox"
-              checked={fAttention}
-              onChange={(e) => {
-                setFAttention(e.target.checked);
-                if (!e.target.checked) {
-                  setFUncertain(false);
-                }
+            {/* Only extra attention */}
+            <label
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                height: '44px',
+                fontSize: '14px',
+                fontWeight: 600,
+                cursor: 'pointer',
+                whiteSpace: 'nowrap',
+                userSelect: 'none',
               }}
-              style={{ width: '18px', height: '18px', accentColor: '#E20714' }}
-            />
-            {isNl ? 'Enkel extra aandacht' : 'Just extra attention'}
-          </label>
+            >
+              <input
+                type="checkbox"
+                checked={fAttention}
+                onChange={(e) => {
+                  setFAttention(e.target.checked);
+                  if (!e.target.checked) {
+                    setFUncertain(false);
+                  }
+                }}
+                style={{ width: '18px', height: '18px', accentColor: '#E20714' }}
+              />
+              {isNl ? 'Enkel extra aandacht' : 'Just extra attention'}
+            </label>
 
-          {/* Wait > 4 hours */}
-          <label
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '8px',
-              height: '44px',
-              fontSize: '14px',
-              fontWeight: 600,
-              cursor: 'pointer',
-            }}
-          >
-            <input
-              type="checkbox"
-              checked={fLong}
-              onChange={(e) => {
-                setFLong(e.target.checked);
-                if (e.target.checked) {
-                  setFUncertain(false);
-                }
+            {/* Wait > 4 hours */}
+            <label
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                height: '44px',
+                fontSize: '14px',
+                fontWeight: 600,
+                cursor: 'pointer',
+                whiteSpace: 'nowrap',
+                userSelect: 'none',
               }}
-              style={{ width: '18px', height: '18px', accentColor: '#E20714' }}
-            />
-            {isNl ? 'Wacht langer dan 4 uur' : 'Wait longer than 4 hours'}
-          </label>
+            >
+              <input
+                type="checkbox"
+                checked={fLong}
+                onChange={(e) => {
+                  setFLong(e.target.checked);
+                  if (e.target.checked) {
+                    setFUncertain(false);
+                  }
+                }}
+                style={{ width: '18px', height: '18px', accentColor: '#E20714' }}
+              />
+              {isNl ? 'Wacht langer dan 4 uur' : 'Wait longer than 4 hours'}
+            </label>
+          </div>
         </div>
 
         {/* Bottom Actions Row: Clear filters on left, count indicator on right */}
@@ -1068,7 +1105,7 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
             style={{
               display: 'grid',
               gridTemplateColumns:
-                'minmax(112px, 0.8fr) minmax(170px, 1.6fr) minmax(128px, 1fr) 52px minmax(168px, 1.2fr) minmax(150px, 1fr)',
+                'minmax(110px, 0.85fr) minmax(180px, 2fr) minmax(135px, 1.15fr) minmax(56px, 0.45fr) minmax(160px, 1.25fr) minmax(150px, 1.15fr)',
               gap: '12px',
               padding: '10px 16px',
               borderBottom: '1px solid #DADADA',
@@ -1158,7 +1195,7 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
                 animationDelay: `${Math.min(idx, 12) * 35}ms`,
                 display: 'grid',
                 gridTemplateColumns:
-                  'minmax(112px, 0.8fr) minmax(170px, 1.6fr) minmax(128px, 1fr) 52px minmax(168px, 1.2fr) minmax(150px, 1fr)',
+                  'minmax(110px, 0.85fr) minmax(180px, 2fr) minmax(135px, 1.15fr) minmax(56px, 0.45fr) minmax(160px, 1.25fr) minmax(150px, 1.15fr)',
                 gap: '12px',
                 width: '100%',
                 padding: '12px 16px',

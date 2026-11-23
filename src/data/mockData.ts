@@ -1,5 +1,6 @@
 export interface OrderLine {
   id: string;
+  lineNumber?: number;
   raw: string;
   art: string;
   qty: number | null;
@@ -16,6 +17,8 @@ export interface OrderLine {
 
 export interface OrderItem {
   nr: string;
+  order_id?: number;
+  rawReceivedAt?: string;
   klant: string;
   klantNr: string;
   klantConf: number;

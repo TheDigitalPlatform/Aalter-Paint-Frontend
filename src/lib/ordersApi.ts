@@ -104,6 +104,7 @@ export interface CustomerContactInfo {
 
 export interface OrderLineDetail {
   id?: number;
+  line_id?: number;
   order_id?: number;
   line_number?: number | null;
   product_description?: string | null;

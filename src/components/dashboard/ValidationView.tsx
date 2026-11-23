@@ -15,9 +15,7 @@ import {
   fetchValidationOrdersCount,
   fetchCustomerEmailDraft,
   sendCustomerEmail,
-  fetchCustomerEmailHistory,
   type OrderDetail,
-  type OrderListItem,
   type EmailAttachmentItem,
   type CustomerContactInfo,
 } from '../../lib/ordersApi';
@@ -277,7 +275,7 @@ function mapOrderDetailToOrderItem(apiOrder: OrderDetail, isNl: boolean): OrderI
     const rawQtyStr = l.quantity !== null && l.quantity !== undefined ? String(l.quantity) : '';
     const numQty = rawQtyStr !== '' && !isNaN(parseFloat(rawQtyStr)) ? parseFloat(rawQtyStr) : null;
     const formattedQtyStr = rawQtyStr !== '' ? formatQuantity(rawQtyStr) : (numQty !== null ? formatQuantity(numQty) : '');
-    const dbLineId = (l as any).id || l.line_id;
+    const dbLineId = (l as any).id || (l as any).line_id;
     const lineNumber = l.line_number || i + 1;
 
     if (itemCode && !CAT[itemCode]) {
@@ -479,6 +477,236 @@ export function renderAttachmentIcon(filename?: string) {
   );
 }
 
+const EMAIL_REGEX = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
+
+interface EmailChipsInputProps {
+  id: string;
+  emails: string[];
+  onChangeEmails: (emails: string[]) => void;
+  inputValue: string;
+  onChangeInput: (val: string) => void;
+  error?: string;
+  onErrorChange: (err: string) => void;
+  placeholder: string;
+  isNl: boolean;
+  helperText?: string;
+}
+
+const EmailChipsInput: React.FC<EmailChipsInputProps> = ({
+  id,
+  emails,
+  onChangeEmails,
+  inputValue,
+  onChangeInput,
+  error,
+  onErrorChange,
+  placeholder,
+  isNl,
+  helperText,
+}) => {
+  const [isFocused, setIsFocused] = useState(false);
+  const inputRef = React.useRef<HTMLInputElement>(null);
+
+  const addEmail = (raw: string) => {
+    const clean = raw.trim().replace(/[,;]+$/, '').trim();
+    if (!clean) return;
+    if (EMAIL_REGEX.test(clean)) {
+      if (!emails.includes(clean)) {
+        onChangeEmails([...emails, clean]);
+      }
+      onChangeInput('');
+      onErrorChange('');
+    } else {
+      onErrorChange(
+        isNl
+          ? `Ongeldig e-mailadres: "${clean}"`
+          : `Invalid email address: "${clean}"`
+      );
+    }
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter' || e.key === ',' || e.key === ';') {
+      e.preventDefault();
+      addEmail(inputValue);
+    } else if (e.key === 'Backspace' && !inputValue && emails.length > 0) {
+      onChangeEmails(emails.slice(0, -1));
+      onErrorChange('');
+    }
+  };
+
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = e.target.value;
+    if (val.includes(',') || val.includes(';')) {
+      const parts = val.split(/[,;]+/).map((s) => s.trim()).filter(Boolean);
+      const newEmails = [...emails];
+      let invalidToken = '';
+      parts.forEach((p) => {
+        if (EMAIL_REGEX.test(p)) {
+          if (!newEmails.includes(p)) {
+            newEmails.push(p);
+          }
+        } else {
+          invalidToken = p;
+        }
+      });
+      onChangeEmails(newEmails);
+      if (invalidToken) {
+        onChangeInput(invalidToken);
+        onErrorChange(
+          isNl
+            ? `Ongeldig e-mailadres: "${invalidToken}"`
+            : `Invalid email address: "${invalidToken}"`
+        );
+      } else {
+        onChangeInput('');
+        onErrorChange('');
+      }
+    } else {
+      onChangeInput(val);
+      if (error) {
+        onErrorChange('');
+      }
+    }
+  };
+
+  const handleBlur = () => {
+    setIsFocused(false);
+    if (inputValue.trim()) {
+      addEmail(inputValue);
+    }
+  };
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '3px', width: '100%' }}>
+      <div
+        onClick={() => inputRef.current?.focus()}
+        style={{
+          display: 'flex',
+          flexWrap: 'wrap',
+          alignItems: 'center',
+          gap: '6px',
+          minHeight: '40px',
+          padding: '4px 8px',
+          border: error ? '1.5px solid #E20714' : isFocused ? '1.5px solid #1A1A1A' : '1px solid #C9C9C9',
+          boxShadow: error ? '0 0 0 1px #E20714' : isFocused ? '0 0 0 1px #1A1A1A' : 'none',
+          borderRadius: 0,
+          background: '#FFFFFF',
+          cursor: 'text',
+          transition: 'border-color 0.15s, box-shadow 0.15s',
+          boxSizing: 'border-box',
+        }}
+      >
+        {emails.map((email, idx) => (
+          <span
+            key={`${email}-${idx}`}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '6px',
+              background: '#F3F4F6',
+              border: '1px solid #E5E7EB',
+              borderRadius: '6px',
+              padding: '2px 8px 2px 10px',
+              fontSize: '13px',
+              fontWeight: 500,
+              color: '#1A1A1A',
+              lineHeight: '22px',
+              maxWidth: '100%',
+              wordBreak: 'break-all',
+            }}
+          >
+            <span>{email}</span>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onChangeEmails(emails.filter((_, i) => i !== idx));
+              }}
+              title={isNl ? 'Verwijderen' : 'Remove'}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                background: 'none',
+                border: 'none',
+                padding: '0 2px',
+                color: '#8C8C8C',
+                cursor: 'pointer',
+                fontSize: '15px',
+                fontWeight: 700,
+                lineHeight: 1,
+                borderRadius: '50%',
+                transition: 'color 0.15s',
+              }}
+              onMouseEnter={(e) => (e.currentTarget.style.color = '#E20714')}
+              onMouseLeave={(e) => (e.currentTarget.style.color = '#8C8C8C')}
+            >
+              ×
+            </button>
+          </span>
+        ))}
+        <input
+          ref={inputRef}
+          id={id}
+          type="text"
+          value={inputValue}
+          onFocus={() => setIsFocused(true)}
+          onBlur={handleBlur}
+          onChange={handleChange}
+          onKeyDown={handleKeyDown}
+          placeholder={emails.length === 0 ? placeholder : (isNl ? 'Nog een toevoegen...' : 'Add another...')}
+          style={{
+            border: 'none',
+            outline: 'none',
+            background: 'transparent',
+            fontSize: '14px',
+            color: '#1A1A1A',
+            flex: '1 1 180px',
+            minWidth: '140px',
+            height: '30px',
+            padding: '0 4px',
+            fontFamily: 'inherit',
+          }}
+        />
+      </div>
+      {error ? (
+        <span
+          style={{
+            fontSize: '12px',
+            color: '#E20714',
+            fontWeight: 600,
+            display: 'flex',
+            alignItems: 'center',
+            gap: '4px',
+            marginTop: '2px',
+          }}
+        >
+          <svg
+            width="13"
+            height="13"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <circle cx="12" cy="12" r="10" />
+            <line x1="12" y1="8" x2="12" y2="12" />
+            <line x1="12" y1="16" x2="12.01" y2="16" />
+          </svg>
+          {error}
+        </span>
+      ) : helperText ? (
+        <span style={{ fontSize: '11px', color: '#6B6B6B', marginTop: '2px' }}>
+          {helperText}
+        </span>
+      ) : null}
+    </div>
+  );
+};
+
 export const ValidationView: React.FC<ValidationViewProps> = ({
   language,
   selectedOrderNr = 'AP-26-04819',
@@ -507,13 +735,13 @@ export const ValidationView: React.FC<ValidationViewProps> = ({
   // Local copy of orders for interactive state
   const [orders, setOrders] = useState<OrderItem[]>(() => INITIAL_ORDERS);
   const [currentNr, setCurrentNr] = useState(selectedOrderNr);
-  const [loadingOrder, setLoadingOrder] = useState<boolean>(false);
+  const [, setLoadingOrder] = useState<boolean>(false);
   const [liveOrder, setLiveOrder] = useState<OrderItem | null>(null);
   const [confirmingLineId, setConfirmingLineId] = useState<string | null>(null);
   const [attachments, setAttachments] = useState<EmailAttachmentItem[]>([]);
   const [loadingAttachments, setLoadingAttachments] = useState<boolean>(false);
   const [liveContact, setLiveContact] = useState<CustomerContactInfo | null>(null);
-  const [loadingContact, setLoadingContact] = useState<boolean>(false);
+  const [, setLoadingContact] = useState<boolean>(false);
 
   // Sync prop changes for totalCountFromSidebar
   useEffect(() => {
@@ -689,7 +917,7 @@ export const ValidationView: React.FC<ValidationViewProps> = ({
             setCurrentNr(mapped.nr);
           }
         })
-        .catch((err) => {
+        .catch(() => {
           // If fetch by ID fails and email ID is available, attempt by-email
           if (selectedEmailId !== undefined) {
             fetchOrderByEmailId(selectedEmailId)
@@ -1179,13 +1407,17 @@ load();
   // AI insights accordion under source (open by default matching reference)
   const [insOpen, setInsOpen] = useState(true);
 
-  // Mail compose dialog state (with CC, BCC and validation warning)
+  // Mail compose dialog state (with CC, BCC chip tags and validation warning)
   const [composeOpen, setComposeOpen] = useState(false);
   const [cTo, setCTo] = useState('');
   const [cSubject, setCSubject] = useState('');
   const [cBody, setCBody] = useState('');
-  const [cCc, setCCc] = useState('');
-  const [cBcc, setCBcc] = useState('');
+  const [cCcList, setCCcList] = useState<string[]>([]);
+  const [cBccList, setCBccList] = useState<string[]>([]);
+  const [cCcInput, setCCcInput] = useState('');
+  const [cBccInput, setCBccInput] = useState('');
+  const [cCcError, setCCcError] = useState('');
+  const [cBccError, setCBccError] = useState('');
   const [composeHint, setComposeHint] = useState('');
   const [isDraftLoading, setIsDraftLoading] = useState(false);
   const [isSendingEmail, setIsSendingEmail] = useState(false);
@@ -1230,6 +1462,12 @@ load();
     setSyncResult(null);
     setIsSyncing(false);
     setComposeOpen(false);
+    setCCcList([]);
+    setCBccList([]);
+    setCCcInput('');
+    setCBccInput('');
+    setCCcError('');
+    setCBccError('');
     setComment('');
     setArtSearch('');
     setRalDraft('');
@@ -1324,12 +1562,22 @@ load();
 
     const orderIdentifier = (currentOrder as any)?.order_id || currentOrder.nr;
 
+    const parseEmails = (val: any): string[] => {
+      if (!val) return [];
+      if (Array.isArray(val)) return val.map((s) => String(s).trim()).filter(Boolean);
+      return String(val).split(/[,;]+/).map((s) => s.trim()).filter(Boolean);
+    };
+
     try {
       if (orderIdentifier) {
         const draft = await fetchCustomerEmailDraft(orderIdentifier);
         setCTo(draft.to && draft.to.length ? draft.to.join(', ') : (currentOrder.from || ''));
-        setCCc(draft.cc && draft.cc.length ? draft.cc.join(', ') : '');
-        setCBcc(draft.bcc && draft.bcc.length ? draft.bcc.join(', ') : '');
+        setCCcList(parseEmails(draft.cc));
+        setCBccList(parseEmails(draft.bcc));
+        setCCcInput('');
+        setCBccInput('');
+        setCCcError('');
+        setCBccError('');
         setCSubject(draft.subject || `Re: ${currentOrder.subject} (${currentOrder.ref})`);
         setCBody(draft.body_text || '');
         setComposeHint(
@@ -1346,6 +1594,13 @@ load();
     } finally {
       setIsDraftLoading(false);
     }
+
+    setCCcList([]);
+    setCBccList([]);
+    setCCcInput('');
+    setCBccInput('');
+    setCCcError('');
+    setCBccError('');
 
     const questions: string[] = [];
     currentOrder.lines.forEach((l, i) => {
@@ -1431,12 +1686,40 @@ load();
       return;
     }
 
+    const finalCc = [...cCcList];
+    if (cCcInput.trim()) {
+      const clean = cCcInput.trim().replace(/[,;]+$/, '').trim();
+      if (EMAIL_REGEX.test(clean)) {
+        if (!finalCc.includes(clean)) finalCc.push(clean);
+      } else {
+        setCCcError(isNl ? `Ongeldig e-mailadres: "${clean}"` : `Invalid email address: "${clean}"`);
+        toast.error(isNl ? 'Controleer ongeldig e-mailadres in Cc' : 'Invalid email address in CC');
+        return;
+      }
+    }
+    const finalBcc = [...cBccList];
+    if (cBccInput.trim()) {
+      const clean = cBccInput.trim().replace(/[,;]+$/, '').trim();
+      if (EMAIL_REGEX.test(clean)) {
+        if (!finalBcc.includes(clean)) finalBcc.push(clean);
+      } else {
+        setCBccError(isNl ? `Ongeldig e-mailadres: "${clean}"` : `Invalid email address: "${clean}"`);
+        toast.error(isNl ? 'Controleer ongeldig e-mailadres in Bcc' : 'Invalid email address in BCC');
+        return;
+      }
+    }
+
+    if (cCcError || cBccError) {
+      toast.error(isNl ? 'Controleer ongeldige e-mailadressen' : 'Please fix invalid email addresses');
+      return;
+    }
+
     setIsSendingEmail(true);
     try {
       const res = await sendCustomerEmail(orderIdentifier, {
         to: targetTo,
-        cc: cCc.trim() ? cCc : undefined,
-        bcc: cBcc.trim() ? cBcc : undefined,
+        cc: finalCc.length ? finalCc : undefined,
+        bcc: finalBcc.length ? finalBcc : undefined,
         subject: cSubject.trim(),
         body_text: cBody.trim(),
       });
@@ -1459,8 +1742,8 @@ load();
           try {
             const res = await sendCustomerEmail(orderIdentifier, {
               to: targetTo,
-              cc: cCc.trim() ? cCc : undefined,
-              bcc: cBcc.trim() ? cBcc : undefined,
+              cc: finalCc.length ? finalCc : undefined,
+              bcc: finalBcc.length ? finalBcc : undefined,
               subject: cSubject.trim(),
               body_text: cBody.trim(),
               force: true,
@@ -2257,14 +2540,14 @@ load();
           )}
 
           {/* Location */}
-          <span style={{ display: 'flex', alignItems: 'center', gap: '8px', color: contactLocation ? '#1A1A1A' : '#8C8C8C' }}>
-            <span style={{ color: '#6B6B6B', display: 'flex' }}>
+          <span style={{ display: 'flex', alignItems: 'center', gap: '8px', color: contactLocation ? '#1A1A1A' : '#8C8C8C', maxWidth: '100%', wordBreak: 'break-word', overflowWrap: 'anywhere' }}>
+            <span style={{ color: '#6B6B6B', display: 'flex', flexShrink: 0 }}>
               <svg className="s" viewBox="0 0 24 24">
                 <path d="M12 21s-7-6.1-7-11a7 7 0 0 1 14 0c0 4.9-7 11-7 11z" />
                 <circle cx="12" cy="10" r="2.5" />
               </svg>
             </span>
-            {contactLocation || '—'}
+            <span>{contactLocation || '—'}</span>
           </span>
 
           {currentOrder.klantNr ? (
@@ -2421,65 +2704,68 @@ load();
                 />
               </div>
 
-              {/* CC Field with helper */}
-              <label htmlFor="cmp-cc" style={{ color: '#6B6B6B' }}>
-                Cc
-              </label>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
-                <input
-                  id="cmp-cc"
-                  type="text"
-                  value={cCc}
-                  onChange={(e) => {
-                    setCCc(e.target.value);
-                    validateEmails(e.target.value);
-                  }}
-                  placeholder="bv. werfleider@uvin.be, werf@uvin.be"
-                  style={{
-                    height: '40px',
-                    padding: '0 10px',
-                    border: '1px solid #C9C9C9',
-                    borderRadius: 0,
-                    fontSize: '15px',
-                    background: '#FFFFFF',
-                  }}
-                />
-                <span style={{ fontSize: '11px', color: '#6B6B6B' }}>
-                  {isNl
-                    ? 'Meerdere e-mailadressen scheiden met een komma of puntkomma.'
-                    : 'Separate multiple email addresses with a comma or semicolon.'}
+              <div
+                style={{
+                  gridColumn: 'span 2',
+                  fontSize: '12px',
+                  color: '#6B6B6B',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  paddingTop: '6px',
+                  paddingBottom: '2px',
+                }}
+              >
+                <span style={{ fontWeight: 600, color: '#1A1A1A' }}>
+                  {isNl ? 'Meerdere CC/BCC-ontvangers toevoegen' : 'Add multiple CC/BCC recipients'}
+                </span>
+                <span>·</span>
+                <span>
+                  {isNl ? 'Druk op Enter of komma om toe te voegen.' : 'Press Enter or comma to add.'}
                 </span>
               </div>
 
-              {/* BCC Field with helper */}
-              <label htmlFor="cmp-bcc" style={{ color: '#6B6B6B' }}>
+              {/* CC Field */}
+              <label htmlFor="cmp-cc" style={{ color: '#6B6B6B', alignSelf: 'start', paddingTop: '10px' }}>
+                Cc
+              </label>
+              <EmailChipsInput
+                id="cmp-cc"
+                emails={cCcList}
+                onChangeEmails={setCCcList}
+                inputValue={cCcInput}
+                onChangeInput={setCCcInput}
+                error={cCcError}
+                onErrorChange={setCCcError}
+                placeholder={isNl ? 'Cc-ontvanger toevoegen...' : 'Add CC recipient...'}
+                isNl={isNl}
+                helperText={
+                  isNl
+                    ? 'Meerdere e-mailadressen scheiden met een komma of Enter.'
+                    : 'Separate multiple email addresses with a comma or Enter.'
+                }
+              />
+
+              {/* BCC Field */}
+              <label htmlFor="cmp-bcc" style={{ color: '#6B6B6B', alignSelf: 'start', paddingTop: '10px' }}>
                 Bcc
               </label>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
-                <input
-                  id="cmp-bcc"
-                  type="text"
-                  value={cBcc}
-                  onChange={(e) => {
-                    setCBcc(e.target.value);
-                    validateEmails(e.target.value);
-                  }}
-                  placeholder="bv. administratie@aalterpaint.be"
-                  style={{
-                    height: '40px',
-                    padding: '0 10px',
-                    border: '1px solid #C9C9C9',
-                    borderRadius: 0,
-                    fontSize: '15px',
-                    background: '#FFFFFF',
-                  }}
-                />
-                <span style={{ fontSize: '11px', color: '#6B6B6B' }}>
-                  {isNl
+              <EmailChipsInput
+                id="cmp-bcc"
+                emails={cBccList}
+                onChangeEmails={setCBccList}
+                inputValue={cBccInput}
+                onChangeInput={setCBccInput}
+                error={cBccError}
+                onErrorChange={setCBccError}
+                placeholder={isNl ? 'Bcc-ontvanger toevoegen (optioneel)...' : 'Add BCC recipient (optional)...'}
+                isNl={isNl}
+                helperText={
+                  isNl
                     ? 'Bcc-ontvangers zijn niet zichtbaar voor de klant.'
-                    : 'Bcc recipients are hidden from the customer.'}
-                </span>
-              </div>
+                    : 'Bcc recipients are hidden from the customer.'
+                }
+              />
 
               {/* Subject Field */}
               <label htmlFor="cmp-subj" style={{ color: '#6B6B6B' }}>
@@ -2636,7 +2922,7 @@ load();
       </div>
 
       {/* 2. Main Two-Column Comparison View */}
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '28px', alignItems: 'flex-start' }}>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '28px', alignItems: 'flex-start', width: '100%', boxSizing: 'border-box' }}>
         {/* LEFT COLUMN: Source document (Bron) */}
         <section
           aria-label={isNl ? 'Bron' : 'Source'}

@@ -193,8 +193,7 @@ export const AuditView: React.FC<AuditViewProps> = ({ language: propLang }) => {
             gap: '4px',
             fontSize: '13px',
             fontWeight: 600,
-            flex: '1 1 200px',
-            maxWidth: '280px',
+            flex: '1 1 240px',
             color: '#1A1A1A',
           }}
         >

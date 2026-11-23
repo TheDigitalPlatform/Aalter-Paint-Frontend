@@ -16,7 +16,7 @@ import { ProfileView } from '../components/dashboard/ProfileView';
 import { getInitials, fetchMyProfile, getRoleName } from '../lib/profileApi';
 import { getRoleBadgeStyle } from '../lib/roleModuleApi';
 import { getModuleDisplayName, type FrontendModuleId } from '../lib/rbac';
-import { fetchOrders, fetchOrdersCount, fetchValidationOrdersCount, fetchWaitingForYouOrders, type WaitingOrderItem } from '../lib/ordersApi';
+import { fetchOrdersCount, fetchValidationOrdersCount, fetchWaitingForYouOrders, type WaitingOrderItem } from '../lib/ordersApi';
 import { User, LogOut, ChevronDown, ChevronUp, Shield } from 'lucide-react';
 import { toast } from 'sonner';
 import { FLOW_TILES, NOTIFICATIONS_DATA } from '../data/mockData';
@@ -914,6 +914,23 @@ export const HomePage: React.FC<HomePageProps> = ({ initialModule = 'overview' }
 
         {/* ============ MAIN VIEW AREA ============ */}
         <div style={{ flex: '1 1 0%', minWidth: 0, display: 'flex', flexDirection: 'column' }}>
+        <style>{`
+          .orders-flow-grid {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            column-gap: 32px;
+          }
+          @media (max-width: 960px) {
+            .orders-flow-grid {
+              grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+            }
+          }
+          @media (max-width: 640px) {
+            .orders-flow-grid {
+              grid-template-columns: 1fr !important;
+            }
+          }
+        `}</style>
         {/* Topbar - Sticky Header */}
         <header
           style={{
@@ -924,7 +941,7 @@ export const HomePage: React.FC<HomePageProps> = ({ initialModule = 'overview' }
             alignItems: 'center',
             justifyContent: 'space-between',
             gap: '16px',
-            padding: '12px 24px',
+            padding: '12px 28px',
             background: '#FFFFFF',
             borderBottom: '1px solid #EBEBEB',
             boxShadow: '0 1px 4px rgba(0, 0, 0, 0.04)',
@@ -1352,9 +1369,9 @@ export const HomePage: React.FC<HomePageProps> = ({ initialModule = 'overview' }
             flexDirection: 'column',
             gap: '24px',
             minWidth: 0,
-            maxWidth: '1480px',
-            boxSizing: 'border-box',
             width: '100%',
+            maxWidth: '100%',
+            boxSizing: 'border-box',
           }}
         >
           {activeModule === 'profile' ? (
@@ -1585,11 +1602,12 @@ export const HomePage: React.FC<HomePageProps> = ({ initialModule = 'overview' }
                   </span>
                 </div>
 
-                {/* 2-Column Grid */}
+                {/* Responsive 3-Column Flow Grid */}
                 <div
+                  className="orders-flow-grid"
                   style={{
                     display: 'grid',
-                    gridTemplateColumns: 'repeat(auto-fit, minmax(min(320px, 100%), 1fr))',
+                    gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
                     columnGap: '32px',
                     padding: '4px 20px 8px 20px',
                   }}

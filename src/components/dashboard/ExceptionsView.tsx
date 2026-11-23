@@ -165,10 +165,23 @@ export const ExceptionsView: React.FC<ExceptionsViewProps> = ({
       </div>
 
       {/* KPI 3-Column Summary Cards */}
+      <style>{`
+        .exceptions-kpi-grid {
+          display: grid;
+          grid-template-columns: repeat(3, minmax(0, 1fr));
+          gap: 12px;
+        }
+        @media (max-width: 860px) {
+          .exceptions-kpi-grid {
+            grid-template-columns: 1fr !important;
+          }
+        }
+      `}</style>
       <div
+        className="exceptions-kpi-grid"
         style={{
           display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(min(180px, 100%), 1fr))',
+          gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
           gap: '12px',
         }}
       >
@@ -533,7 +546,7 @@ export const ExceptionsView: React.FC<ExceptionsViewProps> = ({
               style={{
                 display: 'grid',
                 gridTemplateColumns:
-                  'minmax(112px, 0.8fr) minmax(150px, 1.2fr) minmax(160px, 1.1fr) 128px 140px minmax(170px, 1.4fr)',
+                  'minmax(110px, 0.85fr) minmax(160px, 1.3fr) minmax(160px, 1.2fr) minmax(120px, 0.9fr) minmax(130px, 1fr) minmax(170px, 1.4fr)',
                 gap: '12px',
                 padding: '10px 16px',
                 borderBottom: '1px solid #DADADA',
@@ -585,7 +598,7 @@ export const ExceptionsView: React.FC<ExceptionsViewProps> = ({
                     style={{
                       display: 'grid',
                       gridTemplateColumns:
-                        'minmax(112px, 0.8fr) minmax(150px, 1.2fr) minmax(160px, 1.1fr) 128px 140px minmax(170px, 1.4fr)',
+                        'minmax(110px, 0.85fr) minmax(160px, 1.3fr) minmax(160px, 1.2fr) minmax(120px, 0.9fr) minmax(130px, 1fr) minmax(170px, 1.4fr)',
                       gap: '12px',
                       padding: '12px 16px',
                       borderBottom: '1px solid #EBEBEB',

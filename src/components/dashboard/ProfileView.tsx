@@ -173,8 +173,7 @@ export const ProfileView: React.FC = () => {
         flexDirection: 'column',
         gap: '24px',
         width: '100%',
-        maxWidth: '1120px',
-        margin: '0 auto',
+        maxWidth: '100%',
         paddingBottom: '40px',
       }}
     >

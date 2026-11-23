@@ -176,10 +176,28 @@ export const LearningView: React.FC<LearningViewProps> = ({ language: propLang }
       </div>
 
       {/* 4 Summary Metric Cards */}
+      <style>{`
+        .learning-metrics-grid {
+          display: grid;
+          grid-template-columns: repeat(4, minmax(0, 1fr));
+          gap: 16px;
+        }
+        @media (max-width: 960px) {
+          .learning-metrics-grid {
+            grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+          }
+        }
+        @media (max-width: 520px) {
+          .learning-metrics-grid {
+            grid-template-columns: 1fr !important;
+          }
+        }
+      `}</style>
       <div
+        className="learning-metrics-grid"
         style={{
           display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(min(220px, 100%), 1fr))',
+          gridTemplateColumns: 'repeat(4, minmax(0, 1fr))',
           gap: '16px',
         }}
       >
