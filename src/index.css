@@ -47,7 +47,7 @@ aside,
 div,
 * {
   scrollbar-width: thin;
-  scrollbar-color: #E20714 #F1F1F1;
+  scrollbar-color: #E20714 transparent;
 }
 
 /* WebKit / Chromium (Chrome, Edge, Opera, Brave) - Unified 6px width across window, sidebar & all elements */
@@ -63,7 +63,7 @@ html::-webkit-scrollbar-track,
 body::-webkit-scrollbar-track,
 aside::-webkit-scrollbar-track,
 ::-webkit-scrollbar-track {
-  background: #F1F1F1;
+  background: transparent;
   border-radius: 999px;
 }
 
@@ -261,31 +261,63 @@ svg.s {
 /* Dark mode scrollbar tracks */
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]):not(.light) * {
-    scrollbar-color: #E20714 #1E1E22;
+    scrollbar-color: #E20714 transparent;
   }
 
   :root:not([data-theme="light"]):not(.light) ::-webkit-scrollbar-track {
-    background: #1E1E22;
+    background: transparent;
   }
 
   :root:not([data-theme="light"]):not(.light) ::-webkit-scrollbar-corner {
-    background: #1E1E22;
+    background: transparent;
   }
 }
 
 .dark *,
 [data-theme="dark"] * {
-  scrollbar-color: #E20714 #1E1E22;
+  scrollbar-color: #E20714 transparent;
 }
 
 .dark ::-webkit-scrollbar-track,
 [data-theme="dark"] ::-webkit-scrollbar-track {
-  background: #1E1E22;
+  background: transparent;
 }
 
 .dark ::-webkit-scrollbar-corner,
 [data-theme="dark"] ::-webkit-scrollbar-corner {
-  background: #1E1E22;
+  background: transparent;
+}
+
+/* Dedicated smooth red scrollbar class for email and card containers */
+.custom-red-scrollbar {
+  scrollbar-width: thin !important;
+  scrollbar-color: #E20714 transparent !important;
+}
+
+.custom-red-scrollbar::-webkit-scrollbar {
+  width: 6px !important;
+  height: 6px !important;
+}
+
+.custom-red-scrollbar::-webkit-scrollbar-track {
+  background: transparent !important;
+  border-radius: 999px !important;
+}
+
+.custom-red-scrollbar::-webkit-scrollbar-thumb {
+  background: #E20714 !important;
+  border-radius: 999px !important;
+}
+
+.custom-red-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: #B80510 !important;
+}
+
+.custom-red-scrollbar::-webkit-scrollbar-button {
+  display: none !important;
+  width: 0 !important;
+  height: 0 !important;
+  background: transparent !important;
 }
 
 .row:hover {

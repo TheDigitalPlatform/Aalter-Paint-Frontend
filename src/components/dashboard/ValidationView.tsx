@@ -401,13 +401,18 @@ export function getLineIdFromLine(line?: OrderLine | null, fallbackLineIdStr?: s
   return undefined;
 }
 
-export function isImageAttachment(att?: EmailAttachmentItem | null): boolean {
+export function isPdfAttachment(att?: EmailAttachmentItem | null): boolean {
   if (!att) return false;
-  if (att.content_type && att.content_type.toLowerCase().startsWith('image/')) {
+  const ext = (att.filename || '').split('.').pop()?.toLowerCase() || '';
+  if (ext === 'pdf') return true;
+  if (att.content_type && att.content_type.toLowerCase().includes('application/pdf')) {
     return true;
   }
-  const ext = (att.filename || '').split('.').pop()?.toLowerCase() || '';
-  return ['jpg', 'jpeg', 'png', 'webp', 'bmp', 'gif', 'svg', 'ico', 'tiff', 'tif'].includes(ext);
+  return false;
+}
+
+export function isImageAttachment(att?: EmailAttachmentItem | null): boolean {
+  return !isPdfAttachment(att);
 }
 
 export function formatFileSize(bytes?: number): string {
@@ -417,48 +422,7 @@ export function formatFileSize(bytes?: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-export function renderAttachmentIcon(filename?: string) {
-  const ext = (filename || '').split('.').pop()?.toLowerCase() || '';
-
-  if (['xlsx', 'xls', 'csv'].includes(ext)) {
-    return (
-      <svg
-        viewBox="0 0 24 24"
-        style={{ width: '20px', height: '20px', color: '#107C41', flexShrink: 0 }}
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      >
-        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-        <polyline points="14 2 14 8 20 8" />
-        <line x1="8" y1="13" x2="16" y2="13" />
-        <line x1="8" y1="17" x2="16" y2="17" />
-        <polyline points="10 9 9 9 8 9" />
-      </svg>
-    );
-  }
-
-  if (['jpg', 'jpeg', 'png', 'webp', 'bmp', 'gif', 'svg'].includes(ext)) {
-    return (
-      <svg
-        viewBox="0 0 24 24"
-        style={{ width: '20px', height: '20px', color: '#2563EB', flexShrink: 0 }}
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      >
-        <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
-        <circle cx="8.5" cy="8.5" r="1.5" />
-        <polyline points="21 15 16 10 5 21" />
-      </svg>
-    );
-  }
-
-  // PDF or general document icon
+export function renderAttachmentIcon(_filename?: string) {
   return (
     <svg
       viewBox="0 0 24 24"
@@ -1102,8 +1066,8 @@ export const ValidationView: React.FC<ValidationViewProps> = ({
       .then((emailData) => {
         if (!isCancelled && emailData?.attachments) {
           const rawAttachments = Array.isArray(emailData.attachments) ? emailData.attachments : [];
-          // Filter out image attachments (png, jpg, jpeg, etc.) so only documents (pdf, xlsx, etc.) are shown
-          const docAttachments = rawAttachments.filter((att) => !isImageAttachment(att));
+          // Strictly allow PDF attachments only (no images, spreadsheets, or other formats)
+          const docAttachments = rawAttachments.filter((att) => isPdfAttachment(att));
           setAttachments(docAttachments);
         }
       })
@@ -2926,7 +2890,16 @@ load();
         {/* LEFT COLUMN: Source document (Bron) */}
         <section
           aria-label={isNl ? 'Bron' : 'Source'}
-          style={{ flex: '1 1 420px', minWidth: 0, display: 'flex', flexDirection: 'column', gap: '16px' }}
+          style={{
+            flex: '1 1 420px',
+            minWidth: 0,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '16px',
+            position: 'sticky',
+            top: '20px',
+            alignSelf: 'flex-start',
+          }}
         >
           {/* Tabs bar */}
           <div
@@ -3027,6 +3000,9 @@ load();
                   gap: '16px',
                   fontFamily: "'IBM Plex Mono', ui-monospace, monospace",
                   color: '#1E2A3A',
+                  height: '500px',
+                  maxHeight: '500px',
+                  boxSizing: 'border-box',
                 }}
               >
                 {/* Scanning laser animation line */}
@@ -3040,6 +3016,7 @@ load();
                     gap: '16px',
                     flexWrap: 'wrap',
                     fontFamily: "'Archivo', system-ui, sans-serif",
+                    flexShrink: 0,
                   }}
                 >
                   <div style={{ display: 'flex', flexDirection: 'column' }}>
@@ -3059,7 +3036,7 @@ load();
                 </div>
 
                 {/* Reference & date */}
-                <div style={{ display: 'flex', gap: '24px', flexWrap: 'wrap', fontSize: '13px' }}>
+                <div style={{ display: 'flex', gap: '24px', flexWrap: 'wrap', fontSize: '13px', flexShrink: 0 }}>
                   <span>Ref.: {currentOrder.ref}</span>
                   <span>
                     {isNl ? 'Datum' : 'Date'}: {currentOrder.day}
@@ -3067,7 +3044,21 @@ load();
                 </div>
 
                 {/* Lines table on slip */}
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', fontSize: '13px' }}>
+                <div
+                  className="custom-red-scrollbar"
+                  style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '2px',
+                    fontSize: '13px',
+                    flex: '1 1 auto',
+                    minHeight: 0,
+                    overflowY: 'auto',
+                    paddingRight: '4px',
+                    scrollbarWidth: 'thin',
+                    scrollbarColor: '#E20714 transparent',
+                  }}
+                >
                   <div
                     style={{
                       display: 'grid',
@@ -3140,11 +3131,11 @@ load();
 
               <span style={{ fontSize: '12px', color: '#6B6B6B' }}>
                 {currentOrder.ocrKind || (isNl ? 'E-mail tekst' : 'Email text')}
-                {(attachments.filter((att) => !isImageAttachment(att)).length > 0 || currentOrder.att) ? (
+                {(attachments.filter((att) => isPdfAttachment(att)).length > 0 || currentOrder.att) ? (
                   <>
                     {' · '}
-                    {attachments.filter((att) => !isImageAttachment(att)).length > 0
-                      ? attachments.filter((att) => !isImageAttachment(att)).map((a) => a.filename).join(', ')
+                    {attachments.filter((att) => isPdfAttachment(att)).length > 0
+                      ? attachments.filter((att) => isPdfAttachment(att)).map((a) => a.filename).join(', ')
                       : currentOrder.att}
                   </>
                 ) : null}{' '}
@@ -3163,10 +3154,13 @@ load();
                 background: '#FFFFFF',
                 border: '1px solid #E6E6E6',
                 boxShadow: '0 6px 24px rgba(18,18,18,0.08)',
-                padding: '22px 24px',
+                padding: '20px 24px',
                 display: 'flex',
                 flexDirection: 'column',
-                gap: '14px',
+                gap: '12px',
+                height: '500px',
+                maxHeight: '500px',
+                boxSizing: 'border-box',
               }}
             >
               <div
@@ -3175,129 +3169,158 @@ load();
                   gridTemplateColumns: '96px minmax(0, 1fr)',
                   gap: '6px 12px',
                   fontSize: '14px',
-                  paddingBottom: '14px',
+                  paddingBottom: '12px',
                   borderBottom: '1px solid #EBEBEB',
+                  flexShrink: 0,
                 }}
               >
                 <span style={{ color: '#6B6B6B' }}>{isNl ? 'Van' : 'From'}</span>
-                <span style={{ fontWeight: 600 }}>{currentOrder.from}</span>
+                <span style={{ fontWeight: 600, wordBreak: 'break-all' }}>{currentOrder.from}</span>
                 <span style={{ color: '#6B6B6B' }}>{isNl ? 'Aan' : 'To'}</span>
-                <span>
+                <span style={{ wordBreak: 'break-all' }}>
                   {mbFull} ({mbLabel})
                 </span>
                 <span style={{ color: '#6B6B6B' }}>{isNl ? 'Onderwerp' : 'Subject'}</span>
-                <span style={{ fontWeight: 600 }}>{currentOrder.subject}</span>
+                <span style={{ fontWeight: 600, wordBreak: 'break-word' }}>{currentOrder.subject}</span>
                 <span style={{ color: '#6B6B6B' }}>{isNl ? 'Ontvangen' : 'Received'}</span>
                 <span>
                   {currentOrder.day} {currentOrder.time}
                 </span>
               </div>
 
-              <p style={{ margin: 0, whiteSpace: 'pre-line', fontSize: '15px' }}>{currentOrder.body}</p>
+              {/* Scrollable Email Content Area */}
+              <div
+                className="custom-red-scrollbar"
+                style={{
+                  flex: '1 1 auto',
+                  minHeight: 0,
+                  overflowY: 'auto',
+                  paddingRight: '6px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '14px',
+                  scrollbarWidth: 'thin',
+                  scrollbarColor: '#E20714 transparent',
+                }}
+              >
+                <p
+                  style={{
+                    margin: 0,
+                    whiteSpace: 'pre-line',
+                    fontSize: '15px',
+                    lineHeight: 1.5,
+                    color: '#1A1A1A',
+                    wordBreak: 'break-word',
+                    overflowWrap: 'anywhere',
+                  }}
+                >
+                  {currentOrder.body}
+                </p>
 
-              {/* Live PDF attachments list (shown 1 below 1, click to open in new tab) */}
-              {loadingAttachments ? (
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', color: '#6B6B6B', padding: '6px 0' }}>
-                  <span
-                    style={{
-                      width: '14px',
-                      height: '14px',
-                      border: '2px solid #E20714',
-                      borderTopColor: 'transparent',
-                      borderRadius: '50%',
-                      display: 'inline-block',
-                      animation: 'spin 0.8s linear infinite',
-                    }}
-                  />
-                  {isNl ? 'Bijlagen laden...' : 'Loading attachments...'}
-                </div>
-              ) : attachments.filter((att) => !isImageAttachment(att)).length > 0 ? (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '4px' }}>
-                  {attachments.filter((att) => !isImageAttachment(att)).map((att, idx) => (
-                    <div
-                      key={att.id || `${att.filename}-${idx}`}
-                      onClick={() => handleOpenAttachment(att)}
-                      role="button"
-                      tabIndex={0}
-                      title={isNl ? `Klik om ${att.filename} te openen in een nieuw tabblad` : `Click to open ${att.filename} in a new tab`}
+                {/* Live PDF attachments list (shown 1 below 1, click to open in new tab) */}
+                {loadingAttachments ? (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', color: '#6B6B6B', padding: '6px 0' }}>
+                    <span
                       style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'space-between',
-                        gap: '12px',
-                        padding: '10px 14px',
-                        background: '#FAFAFA',
-                        border: '1px solid #E5E7EB',
-                        borderRadius: '6px',
-                        cursor: 'pointer',
-                        transition: 'all 0.15s ease-in-out',
-                        userSelect: 'none',
+                        width: '14px',
+                        height: '14px',
+                        border: '2px solid #E20714',
+                        borderTopColor: 'transparent',
+                        borderRadius: '50%',
+                        display: 'inline-block',
+                        animation: 'spin 0.8s linear infinite',
                       }}
-                      onMouseEnter={(e) => {
-                        e.currentTarget.style.background = '#FFF5F5';
-                        e.currentTarget.style.borderColor = '#E20714';
-                        e.currentTarget.style.transform = 'translateY(-1px)';
-                        e.currentTarget.style.boxShadow = '0 2px 6px rgba(226, 7, 20, 0.12)';
-                      }}
-                      onMouseLeave={(e) => {
-                        e.currentTarget.style.background = '#FAFAFA';
-                        e.currentTarget.style.borderColor = '#E5E7EB';
-                        e.currentTarget.style.transform = 'none';
-                        e.currentTarget.style.boxShadow = 'none';
-                      }}
-                    >
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0 }}>
-                        {renderAttachmentIcon(att.filename)}
-                        <span
-                          style={{
-                            fontSize: '14px',
-                            fontWeight: 600,
-                            color: '#1A1A1A',
-                            overflow: 'hidden',
-                            textOverflow: 'ellipsis',
-                            whiteSpace: 'nowrap',
-                          }}
-                        >
-                          {att.filename}
-                        </span>
-                        {att.file_size ? (
-                          <span style={{ fontSize: '12px', color: '#6B6B6B', whiteSpace: 'nowrap' }}>
-                            ({formatFileSize(att.file_size)})
-                          </span>
-                        ) : null}
-                      </div>
-
-                      {/* Open in new tab link icon */}
-                      <span
+                    />
+                    {isNl ? 'Bijlagen laden...' : 'Loading attachments...'}
+                  </div>
+                ) : attachments.filter((att) => isPdfAttachment(att)).length > 0 ? (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '4px' }}>
+                    {attachments.filter((att) => isPdfAttachment(att)).map((att, idx) => (
+                      <div
+                        key={att.id || `${att.filename}-${idx}`}
+                        onClick={() => handleOpenAttachment(att)}
+                        role="button"
+                        tabIndex={0}
+                        title={isNl ? `Klik om ${att.filename} te openen in een nieuw tabblad` : `Click to open ${att.filename} in a new tab`}
                         style={{
-                          display: 'inline-flex',
+                          display: 'flex',
                           alignItems: 'center',
-                          gap: '4px',
-                          fontSize: '12px',
-                          fontWeight: 600,
-                          color: '#E20714',
-                          flexShrink: 0,
+                          justifyContent: 'space-between',
+                          gap: '12px',
+                          padding: '10px 14px',
+                          background: '#FAFAFA',
+                          border: '1px solid #E5E7EB',
+                          borderRadius: '6px',
+                          cursor: 'pointer',
+                          transition: 'all 0.15s ease-in-out',
+                          userSelect: 'none',
+                        }}
+                        onMouseEnter={(e) => {
+                          e.currentTarget.style.background = '#FFF5F5';
+                          e.currentTarget.style.borderColor = '#E20714';
+                          e.currentTarget.style.transform = 'translateY(-1px)';
+                          e.currentTarget.style.boxShadow = '0 2px 6px rgba(226, 7, 20, 0.12)';
+                        }}
+                        onMouseLeave={(e) => {
+                          e.currentTarget.style.background = '#FAFAFA';
+                          e.currentTarget.style.borderColor = '#E5E7EB';
+                          e.currentTarget.style.transform = 'none';
+                          e.currentTarget.style.boxShadow = 'none';
                         }}
                       >
-                        {isNl ? 'Openen' : 'Open'}
-                        <svg
-                          viewBox="0 0 24 24"
-                          style={{ width: '14px', height: '14px' }}
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="2"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0 }}>
+                          {renderAttachmentIcon(att.filename)}
+                          <span
+                            style={{
+                              fontSize: '14px',
+                              fontWeight: 600,
+                              color: '#1A1A1A',
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis',
+                              whiteSpace: 'nowrap',
+                            }}
+                          >
+                            {att.filename}
+                          </span>
+                          {att.file_size ? (
+                            <span style={{ fontSize: '12px', color: '#6B6B6B', whiteSpace: 'nowrap' }}>
+                              ({formatFileSize(att.file_size)})
+                            </span>
+                          ) : null}
+                        </div>
+
+                        {/* Open in new tab link icon */}
+                        <span
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '4px',
+                            fontSize: '12px',
+                            fontWeight: 600,
+                            color: '#E20714',
+                            flexShrink: 0,
+                          }}
                         >
-                          <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
-                          <polyline points="15 3 21 3 21 9" />
-                          <line x1="10" y1="14" x2="21" y2="3" />
-                        </svg>
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              ) : null}
+                          {isNl ? 'Openen' : 'Open'}
+                          <svg
+                            viewBox="0 0 24 24"
+                            style={{ width: '14px', height: '14px' }}
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                          >
+                            <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+                            <polyline points="15 3 21 3 21 9" />
+                            <line x1="10" y1="14" x2="21" y2="3" />
+                          </svg>
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
 
               <span
                 style={{
@@ -3307,8 +3330,10 @@ load();
                   gap: '8px',
                   fontSize: '13px',
                   color: '#4D4D4D',
-                  paddingTop: '12px',
+                  paddingTop: '10px',
                   borderTop: '1px solid #EBEBEB',
+                  flexShrink: 0,
+                  marginTop: 'auto',
                 }}
               >
                 <span
