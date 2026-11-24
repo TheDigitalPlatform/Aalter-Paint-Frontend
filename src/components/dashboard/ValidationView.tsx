@@ -1500,6 +1500,8 @@ load();
     liveContact?.location ||
     (currentOrder as any)?.contact_location ||
     (currentOrder as any)?.contactInfo?.location ||
+    (currentOrder as any)?.delivery_address ||
+    (currentOrder as any)?.shipping_address ||
     null;
 
   // Mailbox full & label
@@ -2435,7 +2437,11 @@ load();
                 <path d="M4 21v-1a6 6 0 0 1 6-6h4a6 6 0 0 1 6 6v1" />
               </svg>
             </span>
-            <strong style={{ fontWeight: 600 }}>{contactPerson || '—'}</strong>
+            {contactPerson ? (
+              <strong style={{ fontWeight: 600 }}>{contactPerson}</strong>
+            ) : !contactRole ? (
+              <strong style={{ fontWeight: 600 }}>—</strong>
+            ) : null}
             {contactRole ? <span style={{ color: '#6B6B6B' }}>{contactRole}</span> : null}
           </span>
 
