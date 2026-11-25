@@ -15,9 +15,12 @@ import {
   fetchValidationOrdersCount,
   fetchCustomerEmailDraft,
   sendCustomerEmail,
+  searchBcItems,
+  matchOrderProducts,
   type OrderDetail,
   type EmailAttachmentItem,
   type CustomerContactInfo,
+  type BcItemSearchResult,
 } from '../../lib/ordersApi';
 import { mapApiOrderToOrderItem } from './OrdersView';
 import { getApiBaseUrl, getToken } from '../../lib/auth';
@@ -248,12 +251,22 @@ function mapOrderDetailToOrderItem(apiOrder: OrderDetail, isNl: boolean): OrderI
   const orderNr = apiOrder.order_number || `AP-26-${String(apiOrder.order_id).padStart(5, '0')}`;
 
   const lines: OrderLine[] = (apiOrder.lines || []).map((l, i) => {
-    const lineConf =
+    const matchStatusVal = (l as any).match_status || null;
+    const rawMatchConf = (l as any).match_confidence;
+    const matchConf =
+      rawMatchConf != null
+        ? Math.round(rawMatchConf <= 1 ? rawMatchConf * 100 : rawMatchConf)
+        : (matchStatusVal === 'unmatched' ? 0 : null);
+    const extractionConf =
       l.confidence != null
         ? Math.round(l.confidence <= 1 ? l.confidence * 100 : l.confidence)
-        : (avg ?? 70);
+        : null;
+    const lineConf = matchConf ?? extractionConf ?? (avg ?? 70);
 
+    const bcItemNum = (l as any).bc_item_number || null;
+    const bcItemDesc = (l as any).bc_item_description || null;
     const itemCode =
+      bcItemNum ||
       (l as any).product_reference ||
       l.item_code ||
       (l as any).product_description ||
@@ -280,7 +293,7 @@ function mapOrderDetailToOrderItem(apiOrder: OrderDetail, isNl: boolean): OrderI
 
     if (itemCode && !CAT[itemCode]) {
       CAT[itemCode] = {
-        d: rawText,
+        d: bcItemDesc || rawText,
         fam: itemCode.split(/[-0-9]/)[0] || 'GEN',
         pack,
         unit: detectedUnit,
@@ -296,6 +309,24 @@ function mapOrderDetailToOrderItem(apiOrder: OrderDetail, isNl: boolean): OrderI
             ? 'Hoge score: product, code en verpakking komen overeen.'
             : 'High score: product, code and packaging match.');
 
+    const rawAlts = Array.isArray((l as any).match_alternatives) && (l as any).match_alternatives.length > 0
+      ? (l as any).match_alternatives.map((alt: any) => ({
+          art: alt.bc_item_number || alt.art || '',
+          d: alt.bc_item_description || alt.d || null,
+          conf: alt.confidence != null
+            ? Math.round(alt.confidence <= 1 ? alt.confidence * 100 : alt.confidence)
+            : (alt.conf ?? 0),
+          why: alt.rationale || alt.why || '',
+        })).filter((alt: any) => alt.art)
+      : (l.source_evidence?.alts || []);
+
+    const isLineConfirmed =
+      matchStatusVal === 'confirmed' ||
+      matchStatusVal === 'corrected' ||
+      l.status === 'confirmed' ||
+      l.status === 'approved';
+    const isLineCorrected = matchStatusVal === 'corrected' || l.status === 'corrected';
+
     return {
       id: `${orderNr}-${dbLineId || lineNumber}`,
       dbLineId,
@@ -303,15 +334,20 @@ function mapOrderDetailToOrderItem(apiOrder: OrderDetail, isNl: boolean): OrderI
       orderId: apiOrder.order_id,
       raw: rawText,
       art: itemCode,
+      bcItemNumber: bcItemNum,
+      bcItemDescription: bcItemDesc,
+      matchStatus: matchStatusVal,
+      matchSource: (l as any).match_source || null,
+      matchConfidence: matchConf,
       qty: numQty,
       unit: detectedUnit,
       conf: lineConf,
-      why: l.source_evidence?.reason || (l as any).field_evidence?.reason || whyText,
+      why: (l as any).match_rationale || l.source_evidence?.reason || (l as any).field_evidence?.reason || whyText,
       want: l.source_evidence?.want || { pack },
-      alts: l.source_evidence?.alts || [],
+      alts: rawAlts,
       bonQty: formattedQtyStr,
-      confirmed: l.status === 'confirmed' || l.status === 'approved',
-      corrected: l.status === 'corrected',
+      confirmed: isLineConfirmed,
+      corrected: isLineCorrected,
       by: l.source_evidence?.by || '',
     };
   });
@@ -411,8 +447,23 @@ export function isPdfAttachment(att?: EmailAttachmentItem | null): boolean {
   return false;
 }
 
+export function isWordAttachment(att?: EmailAttachmentItem | null): boolean {
+  if (!att) return false;
+  const ext = (att.filename || '').split('.').pop()?.toLowerCase() || '';
+  if (ext === 'doc' || ext === 'docx') return true;
+  const ct = (att.content_type || '').toLowerCase();
+  return (
+    ct.includes('application/msword') ||
+    ct.includes('application/vnd.openxmlformats-officedocument.wordprocessingml.document')
+  );
+}
+
+export function isSupportedDocumentAttachment(att?: EmailAttachmentItem | null): boolean {
+  return isPdfAttachment(att) || isWordAttachment(att);
+}
+
 export function isImageAttachment(att?: EmailAttachmentItem | null): boolean {
-  return !isPdfAttachment(att);
+  return !isSupportedDocumentAttachment(att);
 }
 
 export function formatFileSize(bytes?: number): string {
@@ -422,11 +473,13 @@ export function formatFileSize(bytes?: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-export function renderAttachmentIcon(_filename?: string) {
+export function renderAttachmentIcon(filename?: string) {
+  const ext = (filename || '').split('.').pop()?.toLowerCase() || '';
+  const isWord = ext === 'doc' || ext === 'docx';
   return (
     <svg
       viewBox="0 0 24 24"
-      style={{ width: '20px', height: '20px', color: '#E20714', flexShrink: 0 }}
+      style={{ width: '20px', height: '20px', color: isWord ? '#2B579A' : '#E20714', flexShrink: 0 }}
       fill="none"
       stroke="currentColor"
       strokeWidth="2"
@@ -755,6 +808,8 @@ export const ValidationView: React.FC<ValidationViewProps> = ({
     unit?: string;
     art?: string;
     raw?: string;
+    bcItemNumber?: string;
+    bcItemDescription?: string;
   }>>({});
 
   // Reset line drafts and live contact when switching orders
@@ -1066,8 +1121,8 @@ export const ValidationView: React.FC<ValidationViewProps> = ({
       .then((emailData) => {
         if (!isCancelled && emailData?.attachments) {
           const rawAttachments = Array.isArray(emailData.attachments) ? emailData.attachments : [];
-          // Strictly allow PDF attachments only (no images, spreadsheets, or other formats)
-          const docAttachments = rawAttachments.filter((att) => isPdfAttachment(att));
+          // Allow PDF and Word (.doc, .docx) attachments
+          const docAttachments = rawAttachments.filter((att) => isSupportedDocumentAttachment(att));
           setAttachments(docAttachments);
         }
       })
@@ -1267,6 +1322,70 @@ load();
       return;
     }
 
+    // Word (.docx / .doc): render DOCX via Mammoth with download fallback for .doc
+    if (ext === 'docx' || ext === 'doc') {
+      newTab.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>${sanitizedName}</title><style>
+*{box-sizing:border-box;margin:0;padding:0;}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:#f1f5f9;color:#1e293b;min-height:100vh;display:flex;flex-direction:column;}
+header{background:#fff;border-bottom:1px solid #e2e8f0;padding:10px 20px;display:flex;align-items:center;justify-content:space-between;flex-shrink:0;box-shadow:0 1px 3px rgba(0,0,0,0.05);position:sticky;top:0;z-index:10;}
+.badge{background:#2b579a;color:#fff;font-size:11px;font-weight:700;padding:4px 8px;border-radius:4px;text-transform:uppercase;}
+.btn{padding:6px 14px;font-size:13px;font-weight:500;border-radius:6px;cursor:pointer;text-decoration:none;display:inline-flex;align-items:center;border:1px solid #e2e8f0;background:#f8fafc;color:#334155;}
+.btn-primary{background:#2b579a;border-color:#2b579a;color:#fff;}
+.content{flex:1;padding:24px;display:flex;justify-content:center;}
+.page{background:#fff;width:100%;max-width:850px;padding:40px 48px;border-radius:6px;box-shadow:0 1px 4px rgba(0,0,0,0.08);line-height:1.6;font-size:14px;}
+.page table{border-collapse:collapse;width:100%;margin:12px 0;}
+.page td,.page th{border:1px solid #cbd5e1;padding:6px 10px;text-align:left;}
+.page h1,.page h2,.page h3{margin:14px 0 8px;}
+.page p{margin:6px 0;}
+.msg{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:300px;gap:12px;color:#64748b;text-align:center;}
+.spinner{width:36px;height:36px;border:3px solid #e2e8f0;border-top-color:#2b579a;border-radius:50%;animation:spin 0.8s linear infinite;}
+@keyframes spin{to{transform:rotate(360deg);}}
+@media print{header,.btn{display:none!important;}body{background:#fff;}.content{padding:0;}.page{box-shadow:none;max-width:none;padding:0;}}
+</style></head><body>
+<header>
+  <div style="display:flex;align-items:center;gap:10px;"><span class="badge">${ext.toUpperCase()}</span><strong>${sanitizedName}</strong></div>
+  <div style="display:flex;gap:8px;"><button class="btn" onclick="window.print()">Print</button><a class="btn btn-primary" href="${contentUrl}" download="${sanitizedName}">Download</a></div>
+</header>
+<div class="content">
+  <div id="loading" class="msg"><div class="spinner"></div><div>Loading ${sanitizedName}...</div></div>
+  <div id="docPage" class="page" style="display:none;"></div>
+  <div id="err" class="msg" style="display:none;">
+    <p style="font-weight:600;color:#334155;">${ext === 'doc' ? 'Legacy .doc files cannot be previewed directly in the browser.' : 'Could not preview Word document.'}</p>
+    <a class="btn btn-primary" href="${contentUrl}" download="${sanitizedName}">Download ${sanitizedName}</a>
+  </div>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/mammoth@1.8.0/mammoth.browser.min.js"></script>
+<script>
+async function loadDoc(){
+  if("${ext}" === "doc"){
+    document.getElementById('loading').style.display='none';
+    document.getElementById('err').style.display='flex';
+    return;
+  }
+  try{
+    const res=await fetch("${contentUrl}");
+    if(!res.ok)throw new Error("HTTP "+res.status);
+    const buf=await res.arrayBuffer();
+    let tryCount=0;
+    while(!window.mammoth&&tryCount<25){await new Promise(r=>setTimeout(r,100));tryCount++;}
+    if(!window.mammoth)throw new Error("Mammoth unavailable");
+    const result=await window.mammoth.convertToHtml({arrayBuffer:buf});
+    document.getElementById('docPage').innerHTML=result.value||'<p style="color:#94a3b8;">(Empty document)</p>';
+    document.getElementById('loading').style.display='none';
+    document.getElementById('docPage').style.display='block';
+  }catch(e){
+    console.error(e);
+    document.getElementById('loading').style.display='none';
+    document.getElementById('err').style.display='flex';
+  }
+}
+loadDoc();
+</script>
+</body></html>`);
+      newTab.document.close();
+      return;
+    }
+
     // Fallback: direct download / view
     newTab.location.href = contentUrl;
   };
@@ -1390,9 +1509,43 @@ load();
   // Comment for approve / reject
   const [comment, setComment] = useState('');
 
-  // Art search query
+  // Art search query & live Business Central search
   const [artSearch, setArtSearch] = useState('');
+  const [bcSearchResults, setBcSearchResults] = useState<BcItemSearchResult[]>([]);
+  const [bcSearchLoading, setBcSearchLoading] = useState(false);
+  const [isRematching, setIsRematching] = useState(false);
   const [ralDraft, setRalDraft] = useState('');
+
+  useEffect(() => {
+    const q = artSearch.trim();
+    if (q.length < 2) {
+      setBcSearchResults([]);
+      setBcSearchLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setBcSearchLoading(true);
+    const timer = setTimeout(async () => {
+      try {
+        const items = await searchBcItems(q, 15);
+        if (!cancelled) {
+          setBcSearchResults(items);
+        }
+      } catch {
+        if (!cancelled) {
+          setBcSearchResults([]);
+        }
+      } finally {
+        if (!cancelled) {
+          setBcSearchLoading(false);
+        }
+      }
+    }, 300);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [artSearch]);
 
   // Animated scan line trigger & progress scan key
   const [scanOn, setScanOn] = useState(true);
@@ -1860,10 +2013,17 @@ load();
 
     const artToSend = draft?.art !== undefined ? draft.art : targetLine.art;
     const rawToSend = draft?.raw !== undefined ? draft.raw : targetLine.raw;
+    const bcNumberToSend = draft?.bcItemNumber !== undefined
+      ? draft.bcItemNumber
+      : (targetLine.bcItemNumber || artToSend);
+    const bcDescToSend = draft?.bcItemDescription !== undefined
+      ? draft.bcItemDescription
+      : (targetLine.bcItemDescription || CAT[artToSend]?.d || rawToSend);
 
     const isCorrected =
       targetLine.corrected ||
       (draft?.art !== undefined && draft.art !== targetLine.art) ||
+      (draft?.bcItemNumber !== undefined && draft.bcItemNumber !== (targetLine.bcItemNumber || targetLine.art)) ||
       (draft?.unit !== undefined && draft.unit !== targetLine.unit) ||
       (draft?.qtyStr !== undefined && draft.qtyStr.trim() !== (formatQuantity(targetLine.bonQty) || formatQuantity(targetLine.qty ?? '')).trim());
 
@@ -1876,6 +2036,10 @@ load();
         ? {
             ...l,
             art: artToSend,
+            bcItemNumber: bcNumberToSend,
+            bcItemDescription: bcDescToSend,
+            matchStatus: isCorrected ? 'corrected' : 'confirmed',
+            matchSource: isCorrected ? 'manual' : (l.matchSource || 'manual'),
             raw: rawToSend,
             qty: parsedQty,
             bonQty: formattedQtyToCommit,
@@ -1910,7 +2074,7 @@ load();
       sessionStorage.setItem(`order_edits_${currentOrder.nr}`, JSON.stringify(updatedLines));
     } catch {}
 
-    // 4. Persist confirmation, quantity, unit, and article to backend PostgreSQL
+    // 4. Persist confirmation, quantity, unit, and BC article to backend PostgreSQL
     if (orderIdToSave && lineIdToSave) {
       setConfirmingLineId(lineId);
       try {
@@ -1919,7 +2083,10 @@ load();
           unit: unitToSend,
           product_reference: artToSend,
           product_description: rawToSend,
+          bc_item_number: bcNumberToSend,
+          bc_item_description: bcDescToSend,
           match_status: isCorrected ? 'corrected' : 'confirmed',
+          match_source: isCorrected ? 'manual' : (targetLine.matchSource || undefined),
           status: 'confirmed',
         });
 
@@ -1981,21 +2148,69 @@ load();
     }
   };
 
-  // Correct line with article from search or alternatives (held in draft until Confirm Line is clicked)
-  const handlePickArticle = (lineId: string, artCode: string) => {
+  // Correct line with article from BC search or alternatives (held in draft until Confirm Line is clicked)
+  const handlePickArticle = (
+    lineId: string,
+    artCode: string,
+    bcDesc?: string | null,
+    bcUnit?: string | null
+  ) => {
     const catItem = CAT[artCode];
-    if (!catItem) return;
+    const resolvedDesc = bcDesc || catItem?.d || artCode;
+    const resolvedUnit = bcUnit
+      ? resolveProductUnit(bcUnit, undefined, resolvedDesc, artCode)
+      : catItem?.unit;
+
+    if (!CAT[artCode]) {
+      CAT[artCode] = {
+        d: resolvedDesc,
+        fam: artCode.split(/[-0-9]/)[0] || 'BC',
+        pack: bcUnit || '10L',
+        unit: resolvedUnit,
+      };
+    }
 
     setLineDrafts((prev) => ({
       ...prev,
       [lineId]: {
         ...prev[lineId],
         art: artCode,
-        raw: catItem.d || prev[lineId]?.raw,
-        unit: catItem.unit || prev[lineId]?.unit,
+        bcItemNumber: artCode,
+        bcItemDescription: resolvedDesc,
+        unit: resolvedUnit || prev[lineId]?.unit,
       },
     }));
     setArtSearch('');
+    setBcSearchResults([]);
+  };
+
+  // Trigger or re-run Business Central AI product matching for current order
+  const handleRematchProducts = async () => {
+    const orderIdToMatch = getOrderIdFromOrder(currentOrder, selectedOrderId);
+    if (!orderIdToMatch || isRematching) return;
+
+    setIsRematching(true);
+    try {
+      await matchOrderProducts(orderIdToMatch, true);
+      const refreshed = await fetchOrderById(orderIdToMatch);
+      const mapped = mapOrderDetailToOrderItem(refreshed, isNl);
+      setLiveOrder(mapped);
+      setOrders((prev) => prev.map((o) => (o.nr === mapped.nr ? mapped : o)));
+      setLineDrafts({});
+      if (onOrderUpdated) onOrderUpdated(mapped);
+      toast.success(
+        isNl
+          ? 'Productmatching met Business Central bijgewerkt'
+          : 'Product matching with Business Central updated'
+      );
+    } catch (err: any) {
+      toast.error(
+        err?.message ||
+          (isNl ? 'Productmatching mislukt' : 'Product matching failed')
+      );
+    } finally {
+      setIsRematching(false);
+    }
   };
 
   // Apply RAL code (held in draft until Confirm Line is clicked)
@@ -2186,10 +2401,21 @@ load();
     }
   };
 
-  // Article search results in catalog
+  // Article search results: live Business Central items first, fallback to local CAT
   const searchResults = useMemo(() => {
     const q = artSearch.trim().toLowerCase();
     if (q.length < 2) return [];
+    if (bcSearchResults.length > 0) {
+      return bcSearchResults.slice(0, 8).map((item) => ({
+        art: item.item_number,
+        d: item.display_name || item.description || item.item_number,
+        unit: item.unit_of_measure || null,
+        note: item.blocked
+          ? (isNl ? 'Geblokkeerd in BC' : 'Blocked in BC')
+          : (item.unit_of_measure || item.item_category || 'BC'),
+        blocked: !!item.blocked,
+      }));
+    }
     return Object.keys(CAT)
       .filter(
         (k) =>
@@ -2201,10 +2427,11 @@ load();
       .map((k) => ({
         art: k,
         d: CAT[k].d,
+        unit: CAT[k].unit || null,
         note: CAT[k].blocked ? (isNl ? 'Geblokkeerd in BC' : 'Blocked in BC') : CAT[k].pack,
         blocked: CAT[k].blocked,
       }));
-  }, [artSearch, isNl]);
+  }, [artSearch, bcSearchResults, isNl]);
 
   // Overall lines summary
   const linesUnderThreshold = currentOrder.lines.filter((l) => l.conf < threshold).length;
@@ -3137,11 +3364,11 @@ load();
 
               <span style={{ fontSize: '12px', color: '#6B6B6B' }}>
                 {currentOrder.ocrKind || (isNl ? 'E-mail tekst' : 'Email text')}
-                {(attachments.filter((att) => isPdfAttachment(att)).length > 0 || currentOrder.att) ? (
+                {(attachments.filter((att) => isSupportedDocumentAttachment(att)).length > 0 || currentOrder.att) ? (
                   <>
                     {' · '}
-                    {attachments.filter((att) => isPdfAttachment(att)).length > 0
-                      ? attachments.filter((att) => isPdfAttachment(att)).map((a) => a.filename).join(', ')
+                    {attachments.filter((att) => isSupportedDocumentAttachment(att)).length > 0
+                      ? attachments.filter((att) => isSupportedDocumentAttachment(att)).map((a) => a.filename).join(', ')
                       : currentOrder.att}
                   </>
                 ) : null}{' '}
@@ -3223,7 +3450,7 @@ load();
                   {currentOrder.body}
                 </p>
 
-                {/* Live PDF attachments list (shown 1 below 1, click to open in new tab) */}
+                {/* Live PDF & Word attachments list (shown 1 below 1, click to open in new tab) */}
                 {loadingAttachments ? (
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', color: '#6B6B6B', padding: '6px 0' }}>
                     <span
@@ -3239,9 +3466,9 @@ load();
                     />
                     {isNl ? 'Bijlagen laden...' : 'Loading attachments...'}
                   </div>
-                ) : attachments.filter((att) => isPdfAttachment(att)).length > 0 ? (
+                ) : attachments.filter((att) => isSupportedDocumentAttachment(att)).length > 0 ? (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '4px' }}>
-                    {attachments.filter((att) => isPdfAttachment(att)).map((att, idx) => (
+                    {attachments.filter((att) => isSupportedDocumentAttachment(att)).map((att, idx) => (
                       <div
                         key={att.id || `${att.filename}-${idx}`}
                         onClick={() => handleOpenAttachment(att)}
@@ -3676,11 +3903,34 @@ load();
             >
               {isNl ? `Orderregels (${currentOrder.lines.length})` : `Order lines (${currentOrder.lines.length})`}
             </h2>
-            <span style={{ fontSize: '13px', color: '#6B6B6B' }}>
-              {isNl
-                ? `${linesUnderThreshold} van ${currentOrder.lines.length} onder de drempel · ${linesConfirmed} bevestigd`
-                : `${linesUnderThreshold} of ${currentOrder.lines.length} below threshold · ${linesConfirmed} confirmed`}
-            </span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+              <span style={{ fontSize: '13px', color: '#6B6B6B' }}>
+                {isNl
+                  ? `${linesUnderThreshold} van ${currentOrder.lines.length} onder de drempel · ${linesConfirmed} bevestigd`
+                  : `${linesUnderThreshold} of ${currentOrder.lines.length} below threshold · ${linesConfirmed} confirmed`}
+              </span>
+              {getOrderIdFromOrder(currentOrder, selectedOrderId) && (
+                <button
+                  type="button"
+                  onClick={handleRematchProducts}
+                  disabled={isRematching}
+                  style={{
+                    padding: '4px 10px',
+                    fontSize: '12px',
+                    fontWeight: 600,
+                    background: '#FFFFFF',
+                    color: '#1A1A1A',
+                    border: '1px solid #C9C9C9',
+                    cursor: isRematching ? 'wait' : 'pointer',
+                    opacity: isRematching ? 0.6 : 1,
+                  }}
+                >
+                  {isRematching
+                    ? (isNl ? 'Matchen...' : 'Matching...')
+                    : (isNl ? 'Opnieuw matchen' : 'Re-match')}
+                </button>
+              )}
+            </div>
           </div>
 
           {/* Lines list */}
@@ -3705,10 +3955,19 @@ load();
               chipText = isNl ? 'Bevestigd' : 'Confirmed';
               chipBg = '#E3F2E9';
               chipFg = '#11603B';
-            } else if (l.conf < threshold || fails > 0 || misses > 0 || l.qty === null) {
-              chipText = isNl ? 'Extra aandacht' : 'Extra attention';
-              chipBg = '#FDEBDD';
-              chipFg = '#8A3405';
+            } else if (
+              l.matchStatus === 'unmatched' ||
+              l.matchStatus === 'uncertain' ||
+              l.conf < threshold ||
+              fails > 0 ||
+              misses > 0 ||
+              l.qty === null
+            ) {
+              chipText = l.matchStatus === 'unmatched'
+                ? (isNl ? 'Geen BC-match' : 'Unmatched')
+                : (isNl ? 'Extra aandacht' : 'Extra attention');
+              chipBg = l.matchStatus === 'unmatched' ? '#FCE8E8' : '#FDEBDD';
+              chipFg = l.matchStatus === 'unmatched' ? '#A61B1B' : '#8A3405';
             }
 
             return (
@@ -3760,9 +4019,11 @@ load();
                           fontWeight: 500,
                         }}
                       >
-                        {l.art}
+                        {lineDrafts[l.id]?.bcItemNumber || lineDrafts[l.id]?.art || l.bcItemNumber || l.art}
                       </span>
-                      <span style={{ fontWeight: 600 }}>{catItem.d}</span>
+                      <span style={{ fontWeight: 600 }}>
+                        {lineDrafts[l.id]?.bcItemDescription || l.bcItemDescription || catItem.d}
+                      </span>
                     </span>
 
                     <span style={{ fontSize: '13px', color: '#6B6B6B', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
@@ -3837,6 +4098,22 @@ load();
                           {isNl ? 'Waarom dit voorstel' : 'Why this proposal'}
                         </span>
                         <ConfidenceBadge value={l.conf} threshold={threshold} showLabel={true} />
+                        {l.matchSource && (
+                          <span
+                            style={{
+                              marginLeft: 'auto',
+                              fontSize: '11px',
+                              fontWeight: 600,
+                              padding: '2px 8px',
+                              background: '#FFFFFF',
+                              border: '1px solid #E5D48A',
+                              color: '#5C4A00',
+                              borderRadius: '2px',
+                            }}
+                          >
+                            {isNl ? 'Bron' : 'Source'}: {l.matchSource}
+                          </span>
+                        )}
                       </span>
 
                       <span style={{ fontSize: '14px', color: '#1A1A1A' }}>{l.why}</span>
@@ -3864,13 +4141,13 @@ load();
                                   <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: '13px', fontWeight: 500 }}>
                                     {alt.art}
                                   </span>
-                                  <span style={{ fontSize: '14px' }}>{CAT[alt.art]?.d || alt.art}</span>
+                                  <span style={{ fontSize: '14px' }}>{alt.d || CAT[alt.art]?.d || alt.art}</span>
                                 </span>
                                 <span style={{ fontSize: '12px', color: '#6B6B6B' }}>{alt.why}</span>
                               </span>
                               <ConfidenceBadge value={alt.conf} threshold={threshold} showLabel={false} />
                               <button
-                                onClick={() => handlePickArticle(l.id, alt.art)}
+                                onClick={() => handlePickArticle(l.id, alt.art, alt.d || CAT[alt.art]?.d)}
                                 className="lk"
                                 style={{
                                   border: 0,
@@ -4138,12 +4415,17 @@ load();
                           </div>
 
                           {/* Search results dropdown */}
+                          {bcSearchLoading && artSearch.trim().length >= 2 && (
+                            <div style={{ fontSize: '12px', color: '#6B6B6B', padding: '6px 10px', border: '1px solid #DADADA', background: '#FFFFFF' }}>
+                              {isNl ? 'Business Central artikelen zoeken...' : 'Searching Business Central items...'}
+                            </div>
+                          )}
                           {searchResults.length > 0 && (
                             <div style={{ display: 'flex', flexDirection: 'column', border: '1px solid #DADADA', padding: '4px 10px', background: '#FFFFFF' }}>
                               {searchResults.map((r) => (
                                 <button
                                   key={r.art}
-                                  onClick={() => !r.blocked && handlePickArticle(l.id, r.art)}
+                                  onClick={() => !r.blocked && handlePickArticle(l.id, r.art, r.d, r.unit)}
                                   className="row"
                                   disabled={r.blocked}
                                   style={{

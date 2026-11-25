@@ -102,6 +102,22 @@ export interface CustomerContactInfo {
   source?: Record<string, string>;
 }
 
+export interface MatchAlternativeItem {
+  bc_item_number: string;
+  bc_item_description?: string | null;
+  confidence: number;
+  rationale?: string | null;
+}
+
+export interface BcItemSearchResult {
+  item_number: string;
+  display_name: string;
+  description?: string | null;
+  unit_of_measure?: string | null;
+  item_category?: string | null;
+  blocked?: boolean;
+}
+
 export interface OrderLineDetail {
   id?: number;
   line_id?: number;
@@ -116,6 +132,13 @@ export interface OrderLineDetail {
   confidence?: number | null;
   status?: string | null;
   match_status?: string | null;
+  bc_item_number?: string | null;
+  bc_item_description?: string | null;
+  match_confidence?: number | null;
+  match_rationale?: string | null;
+  match_alternatives?: MatchAlternativeItem[] | null;
+  match_source?: string | null;
+  matched_at?: string | null;
   item_code?: string | null;
   description?: string | null;
   unit_of_measure?: string | null;
@@ -127,6 +150,9 @@ export interface OrderDetail {
   order_number?: string;
   email_id: number;
   status: string;
+  match_status?: string | null;
+  match_confidence?: number | null;
+  match_review_reasons?: string[];
   customer_name?: string | null;
   customer_reference?: string | null;
   order_date?: string | null;
@@ -244,6 +270,65 @@ export interface UpdateOrderLinePayload {
   confidence?: number | null;
   match_status?: string | null;
   status?: string | null;
+  bc_item_number?: string | null;
+  bc_item_description?: string | null;
+  match_confidence?: number | null;
+  match_rationale?: string | null;
+  match_source?: string | null;
+}
+
+export async function searchBcItems(
+  query: string,
+  limit: number = 15
+): Promise<BcItemSearchResult[]> {
+  const baseUrl = getApiBaseUrl();
+  const params = new URLSearchParams({
+    q: query,
+    limit: String(limit),
+  });
+  const response = await fetch(`${baseUrl}/business-central/items?${params.toString()}`, {
+    method: 'GET',
+    headers: getAuthHeaders(),
+  });
+
+  if (response.status === 401) {
+    handleUnauthorizedSession();
+    throw new Error('Unauthorized');
+  }
+
+  const json = await response.json();
+  if (!response.ok || !json.success) {
+    throw new Error(json.message || 'Failed to search Business Central items');
+  }
+
+  return Array.isArray(json.data?.items) ? json.data.items : [];
+}
+
+export async function matchOrderProducts(
+  orderId: number | string,
+  force: boolean = false
+): Promise<any> {
+  const baseUrl = getApiBaseUrl();
+  const response = await fetch(`${baseUrl}/orders/${encodeURIComponent(orderId)}/match-products`, {
+    method: 'POST',
+    headers: {
+      ...getAuthHeaders(),
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ force }),
+  });
+
+  if (response.status === 401) {
+    handleUnauthorizedSession();
+    throw new Error('Unauthorized');
+  }
+
+  const json = await response.json();
+  if (!response.ok || !json.success) {
+    throw new Error(json.message || json.error?.message || `Failed to match products for order ${orderId}`);
+  }
+
+  return json.data;
 }
 
 export async function updateOrderLine(

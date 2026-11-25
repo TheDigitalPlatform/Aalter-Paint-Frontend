@@ -3,12 +3,17 @@ export interface OrderLine {
   lineNumber?: number;
   raw: string;
   art: string;
+  bcItemNumber?: string | null;
+  bcItemDescription?: string | null;
+  matchStatus?: string | null;
+  matchSource?: string | null;
+  matchConfidence?: number | null;
   qty: number | null;
   unit: string;
   conf: number;
   why: string;
   want?: Record<string, string>;
-  alts?: Array<{ art: string; conf: number; why: string }>;
+  alts?: Array<{ art: string; d?: string | null; conf: number; why: string }>;
   bonQty: string;
   confirmed: boolean;
   corrected: boolean;
