@@ -143,6 +143,13 @@ textarea:focus {
   outline-offset: 0px !important;
 }
 
+input.no-focus-ring:focus,
+input.no-focus-ring:focus-visible {
+  border-color: transparent !important;
+  outline: none !important;
+  box-shadow: none !important;
+}
+
 svg.i {
   width: 18px;
   height: 18px;

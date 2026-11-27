@@ -2406,7 +2406,7 @@ loadDoc();
     const q = artSearch.trim().toLowerCase();
     if (q.length < 2) return [];
     if (bcSearchResults.length > 0) {
-      return bcSearchResults.slice(0, 8).map((item) => ({
+      return bcSearchResults.slice(0, 10).map((item) => ({
         art: item.item_number,
         d: item.display_name || item.description || item.item_number,
         unit: item.unit_of_measure || null,
@@ -2423,7 +2423,7 @@ loadDoc();
           CAT[k].d.toLowerCase().includes(q) ||
           (CAT[k].ral && CAT[k].ral?.includes(q))
       )
-      .slice(0, 5)
+      .slice(0, 10)
       .map((k) => ({
         art: k,
         d: CAT[k].d,
@@ -2489,12 +2489,13 @@ loadDoc();
   const isApproved = currentOrder.st === 'goedgekeurd' || currentOrder.st === 'gesync';
   const isRejected = currentOrder.st === 'afgewezen';
   const isPending = !isApproved && !isRejected && currentOrder.st !== 'syncfout';
+  const isNeedsAttention = currentOrder.st === 'aandacht' || linesUnderThreshold > 0;
 
   const statusChipBg = isApproved
     ? '#E3F2E9'
     : isRejected
     ? '#EBEBEB'
-    : linesUnderThreshold > 0
+    : isNeedsAttention
     ? '#FDEBDD'
     : '#E7EEFC';
 
@@ -2502,7 +2503,7 @@ loadDoc();
     ? '#11603B'
     : isRejected
     ? '#242424'
-    : linesUnderThreshold > 0
+    : isNeedsAttention
     ? '#8A3405'
     : '#1D4FBF';
 
@@ -2514,7 +2515,7 @@ loadDoc();
     ? isNl
       ? 'Afgewezen'
       : 'Rejected'
-    : linesUnderThreshold > 0
+    : isNeedsAttention
     ? isNl
       ? 'Aandacht nodig'
       : 'Needs attention'
@@ -4393,6 +4394,7 @@ loadDoc();
                                 </svg>
                                 <input
                                   type="search"
+                                  className="no-focus-ring"
                                   value={artSearch}
                                   onChange={(e) => setArtSearch(e.target.value)}
                                   placeholder={
@@ -4421,7 +4423,17 @@ loadDoc();
                             </div>
                           )}
                           {searchResults.length > 0 && (
-                            <div style={{ display: 'flex', flexDirection: 'column', border: '1px solid #DADADA', padding: '4px 10px', background: '#FFFFFF' }}>
+                            <div
+                              style={{
+                                display: 'flex',
+                                flexDirection: 'column',
+                                border: '1px solid #DADADA',
+                                padding: '4px 10px',
+                                background: '#FFFFFF',
+                                maxHeight: '240px',
+                                overflowY: 'auto',
+                              }}
+                            >
                               {searchResults.map((r) => (
                                 <button
                                   key={r.art}
@@ -4441,14 +4453,14 @@ loadDoc();
                                     cursor: r.blocked ? 'not-allowed' : 'pointer',
                                   }}
                                 >
-                                  <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: '13px', fontWeight: 500 }}>
+                                  <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: '13px', fontWeight: 700, color: '#1A1A1A' }}>
                                     {r.art}
                                   </span>
-                                  <span style={{ fontSize: '14px' }}>{r.d}</span>
+                                  <span style={{ fontSize: '14px', fontWeight: 600, color: '#1A1A1A' }}>{r.d}</span>
                                   <span
                                     style={{
                                       fontSize: '12px',
-                                      color: r.blocked ? '#A61B1B' : '#4D4D4D',
+                                      color: r.blocked ? '#A61B1B' : '#6B6B6B',
                                       marginLeft: 'auto',
                                     }}
                                   >
