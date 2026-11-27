@@ -16,10 +16,17 @@ import { ProfileView } from '../components/dashboard/ProfileView';
 import { getInitials, fetchMyProfile, getRoleName } from '../lib/profileApi';
 import { getRoleBadgeStyle } from '../lib/roleModuleApi';
 import { getModuleDisplayName, type FrontendModuleId } from '../lib/rbac';
-import { fetchOrdersCount, fetchValidationOrdersCount, fetchWaitingForYouOrders, type WaitingOrderItem } from '../lib/ordersApi';
+import {
+  fetchOrdersCount,
+  fetchValidationOrdersCount,
+  fetchWaitingForYouOrders,
+  fetchOrdersTodaySummary,
+  type WaitingOrderItem,
+  type OrdersTodaySummaryData,
+} from '../lib/ordersApi';
 import { User, LogOut, ChevronDown, ChevronUp, Shield } from 'lucide-react';
 import { toast } from 'sonner';
-import { FLOW_TILES, NOTIFICATIONS_DATA } from '../data/mockData';
+import { NOTIFICATIONS_DATA } from '../data/mockData';
 
 export type ActiveModule = FrontendModuleId;
 
@@ -157,6 +164,7 @@ export const HomePage: React.FC<HomePageProps> = ({ initialModule = 'overview' }
   });
   const [waitingOrders, setWaitingOrders] = useState<WaitingOrderItem[]>([]);
   const [loadingWaitingOrders, setLoadingWaitingOrders] = useState<boolean>(true);
+  const [todaySummary, setTodaySummary] = useState<OrdersTodaySummaryData | null>(null);
 
   // Dynamically load live sidebar order & validation counts
   useEffect(() => {
@@ -267,6 +275,16 @@ export const HomePage: React.FC<HomePageProps> = ({ initialModule = 'overview' }
         if (!isCancelled) {
           setLoadingWaitingOrders(false);
         }
+      });
+
+    fetchOrdersTodaySummary()
+      .then((summaryData) => {
+        if (!isCancelled && summaryData) {
+          setTodaySummary(summaryData);
+        }
+      })
+      .catch((err) => {
+        console.warn('fetchOrdersTodaySummary failed:', err);
       });
 
     return () => {
@@ -1597,8 +1615,8 @@ export const HomePage: React.FC<HomePageProps> = ({ initialModule = 'overview' }
                   </h2>
                   <span style={{ fontSize: '12px', color: '#6B6B6B', marginLeft: 'auto' }}>
                     {language === 'NL'
-                      ? 'In de volgorde van de stroom · voorbeelddata'
-                      : 'In the order of the flow · example data'}
+                      ? 'In de volgorde van de stroom · live data'
+                      : 'In the order of the flow · live data'}
                   </span>
                 </div>
 
@@ -1612,7 +1630,95 @@ export const HomePage: React.FC<HomePageProps> = ({ initialModule = 'overview' }
                     padding: '4px 20px 8px 20px',
                   }}
                 >
-                  {FLOW_TILES.map((k) => (
+                  {(() => {
+                    const s = todaySummary;
+                    const counts = [
+                      s?.received ?? 0,
+                      s?.incorporated ?? 0,
+                      s?.awaiting_inspection ?? 0,
+                      s?.approved ?? 0,
+                      s?.rejected ?? 0,
+                      s?.synchronized ?? 0,
+                    ];
+                    const maxCount = Math.max(...counts, 1);
+                    const pct = (val: number) => (val > 0 ? Math.max(8, Math.round((val / maxCount) * 100)) : 0);
+
+                    const liveFlowTiles = [
+                      {
+                        nr: '01',
+                        label: 'Received',
+                        step: 'Mail intake',
+                        who: 'System',
+                        sub: 'order emails received today',
+                        barColor: '#E20714',
+                        shown: counts[0],
+                        w: pct(counts[0]),
+                        d: 60,
+                        bd: 250,
+                      },
+                      {
+                        nr: '02',
+                        label: 'Incorporated',
+                        step: 'OCR and AI',
+                        who: 'Automatic',
+                        sub: 'processed orders today',
+                        barColor: '#E20714',
+                        shown: counts[1],
+                        w: pct(counts[1]),
+                        d: 130,
+                        bd: 340,
+                      },
+                      {
+                        nr: '03',
+                        label: 'Awaiting inspection',
+                        step: 'Validation',
+                        who: 'Employee',
+                        sub: 'awaiting human review',
+                        barColor: '#E20714',
+                        shown: counts[2],
+                        w: pct(counts[2]),
+                        d: 200,
+                        bd: 430,
+                      },
+                      {
+                        nr: '04',
+                        label: 'Approved',
+                        step: 'Validation',
+                        who: 'Employee',
+                        sub: 'approved today',
+                        barColor: '#E20714',
+                        shown: counts[3],
+                        w: pct(counts[3]),
+                        d: 270,
+                        bd: 520,
+                      },
+                      {
+                        nr: '05',
+                        label: 'Rejected',
+                        step: 'Validation',
+                        who: 'Employee',
+                        sub: 'rejected today',
+                        barColor: '#767676',
+                        shown: counts[4],
+                        w: pct(counts[4]),
+                        d: 340,
+                        bd: 610,
+                      },
+                      {
+                        nr: '06',
+                        label: 'Synchronized with BC',
+                        step: 'Business Central',
+                        who: 'Automatic',
+                        sub: 'synced to Business Central today',
+                        barColor: '#E20714',
+                        shown: counts[5],
+                        w: pct(counts[5]),
+                        d: 410,
+                        bd: 700,
+                      },
+                    ];
+
+                    return liveFlowTiles.map((k) => (
                     <button
                       key={k.nr}
                       onClick={() => handleNav('orders')}
@@ -1681,7 +1787,8 @@ export const HomePage: React.FC<HomePageProps> = ({ initialModule = 'overview' }
                         {k.shown}
                       </span>
                     </button>
-                  ))}
+                  ));
+                  })()}
                 </div>
               </section>
 

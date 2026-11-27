@@ -488,6 +488,36 @@ export interface WaitingOrdersResponseData {
   total_waiting: number;
 }
 
+export interface OrdersTodaySummaryData {
+  date: string;
+  received: number;
+  incorporated: number;
+  awaiting_inspection: number;
+  approved: number;
+  rejected: number;
+  synchronized: number;
+}
+
+export async function fetchOrdersTodaySummary(): Promise<OrdersTodaySummaryData> {
+  const baseUrl = getApiBaseUrl();
+  const response = await fetch(`${baseUrl}/orders/today-summary`, {
+    method: 'GET',
+    headers: getAuthHeaders(),
+  });
+
+  if (response.status === 401) {
+    handleUnauthorizedSession();
+    throw new Error('Unauthorized');
+  }
+
+  const json = await response.json();
+  if (!response.ok || !json.success) {
+    throw new Error(json.message || 'Failed to fetch today orders summary');
+  }
+
+  return json.data;
+}
+
 export async function fetchWaitingForYouOrders(limit: number = 10): Promise<WaitingOrdersResponseData> {
   const baseUrl = getApiBaseUrl();
   const response = await fetch(`${baseUrl}/orders/waiting-for-you?limit=${limit}`, {
