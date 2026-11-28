@@ -935,13 +935,8 @@ export const HomePage: React.FC<HomePageProps> = ({ initialModule = 'overview' }
         <style>{`
           .orders-flow-grid {
             display: grid;
-            grid-template-columns: repeat(3, minmax(0, 1fr));
+            grid-template-columns: repeat(2, minmax(0, 1fr));
             column-gap: 32px;
-          }
-          @media (max-width: 960px) {
-            .orders-flow-grid {
-              grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
-            }
           }
           @media (max-width: 640px) {
             .orders-flow-grid {
@@ -1620,12 +1615,12 @@ export const HomePage: React.FC<HomePageProps> = ({ initialModule = 'overview' }
                   </span>
                 </div>
 
-                {/* Responsive 3-Column Flow Grid */}
+                {/* Responsive 2-Column Flow Grid */}
                 <div
                   className="orders-flow-grid"
                   style={{
                     display: 'grid',
-                    gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
+                    gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
                     columnGap: '32px',
                     padding: '4px 20px 8px 20px',
                   }}
